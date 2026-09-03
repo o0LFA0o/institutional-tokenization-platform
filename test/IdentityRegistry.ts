@@ -22,6 +22,16 @@ describe("IdentityRegistry", function () {
         ).to.equal(true);
     });
 
+    it("rejects the zero address as admin", async function () {
+        const { ethers } = await network.create();
+
+        const IdentityRegistry = await ethers.getContractFactory("IdentityRegistry");
+
+        await expect(
+            IdentityRegistry.deploy(ethers.ZeroAddress)
+        ).to.be.revertedWithCustomError(IdentityRegistry, "InvalidAccount");
+    });
+
     it("starts Tarik as unauthorized", async function () {
         const { registry, tarik } = await deployRegistry();
 
@@ -40,6 +50,19 @@ describe("IdentityRegistry", function () {
         ).to.equal(true);
     });
 
+    it("prevents Luay from granting the compliance role to Wa'el", async function () {
+        const { registry, luay, wael } = await deployRegistry();
+
+        const complianceRole = await registry.COMPLIANCE_ROLE();
+        const defaultAdminRole = await registry.DEFAULT_ADMIN_ROLE();
+
+        await expect(
+            registry.connect(luay).grantRole(complianceRole, wael.address)
+        )
+            .to.be.revertedWithCustomError(registry, "AccessControlUnauthorizedAccount")
+            .withArgs(luay.address, defaultAdminRole);
+    });
+
     it("allows Wa'el to authorize Tarik", async function () {
         const { registry, wael, tarik } = await deployRegistry();
 
@@ -50,6 +73,20 @@ describe("IdentityRegistry", function () {
         await registry.connect(wael).authorize(tarik.address);
 
         expect(await registry.isAuthorized(tarik.address)).to.equal(true);
+    });
+
+    it("emits an audit event when Wa'el authorizes Tarik", async function () {
+        const { registry, wael, tarik } = await deployRegistry();
+
+        const complianceRole = await registry.COMPLIANCE_ROLE();
+
+        await registry.grantRole(complianceRole, wael.address);
+
+        await expect(
+            registry.connect(wael).authorize(tarik.address)
+        )
+            .to.emit(registry, "ParticipantAuthorized")
+            .withArgs(tarik.address, wael.address);
     });
 
     it("prevents Luay from authorizing Tarik without the compliance role", async function () {
@@ -76,6 +113,51 @@ describe("IdentityRegistry", function () {
         await registry.connect(wael).revoke(tarik.address);
 
         expect(await registry.isAuthorized(tarik.address)).to.equal(false);
+    });
+
+    it("emits an audit event when Wa'el revokes Tarik", async function () {
+        const { registry, wael, tarik } = await deployRegistry();
+
+        const complianceRole = await registry.COMPLIANCE_ROLE();
+
+        await registry.grantRole(complianceRole, wael.address);
+        await registry.connect(wael).authorize(tarik.address);
+
+        await expect(
+            registry.connect(wael).revoke(tarik.address)
+        )
+            .to.emit(registry, "ParticipantRevoked")
+            .withArgs(tarik.address, wael.address);
+    });
+
+    it("prevents Wa'el from authorizing Tarik after losing the compliance role", async function () {
+        const { registry, faris, wael, tarik } = await deployRegistry();
+
+        const complianceRole = await registry.COMPLIANCE_ROLE();
+
+        await registry.grantRole(complianceRole, wael.address);
+        await registry.connect(faris).revokeRole(complianceRole, wael.address);
+
+        await expect(
+            registry.connect(wael).authorize(tarik.address)
+        )
+            .to.be.revertedWithCustomError(registry, "AccessControlUnauthorizedAccount")
+            .withArgs(wael.address, complianceRole);
+    });
+
+    it("prevents Luay from revoking Tarik without the compliance role", async function () {
+        const { registry, wael, luay, tarik } = await deployRegistry();
+
+        const complianceRole = await registry.COMPLIANCE_ROLE();
+
+        await registry.grantRole(complianceRole, wael.address);
+        await registry.connect(wael).authorize(tarik.address);
+
+        await expect(
+            registry.connect(luay).revoke(tarik.address)
+        )
+            .to.be.revertedWithCustomError(registry, "AccessControlUnauthorizedAccount")
+            .withArgs(luay.address, complianceRole);
     });
 
     it("prevents Wa'el from authorizing Tarik twice", async function () {
