@@ -440,6 +440,10 @@ describe("AssetToken", function () {
         expect(
             await asset.balanceOf(tarik.address)
         ).to.equal(60n);
+
+        expect(
+            await asset.totalSupply()
+        ).to.equal(60n);
     });
 
     it("prevents Faris from burning without the issuer role", async function () {
@@ -553,5 +557,188 @@ describe("AssetToken", function () {
         expect(
             await asset.balanceOf(tarik.address)
         ).to.equal(60n);
+    });
+
+    it("rejects the zero address as the identity registry", async function () {
+        const { ethers } = await network.create();
+
+        const [faris, luay] = await ethers.getSigners();
+
+        const AssetToken = await ethers.getContractFactory(
+            "AssetToken",
+            faris
+        );
+
+        await expect(
+            AssetToken.deploy(
+                "Luay Institutional Note",
+                "LIN",
+                ethers.ZeroAddress,
+                faris.address,
+                luay.address,
+                faris.address
+            )
+        ).to.be.revertedWithCustomError(
+            AssetToken,
+            "InvalidIdentityRegistry"
+        );
+    });
+
+    it("rejects the zero address as admin", async function () {
+        const { ethers } = await network.create();
+
+        const [faris, luay] = await ethers.getSigners();
+
+        const IdentityRegistry = await ethers.getContractFactory(
+            "IdentityRegistry",
+            faris
+        );
+
+        const registry = await IdentityRegistry.deploy(faris.address);
+
+        const AssetToken = await ethers.getContractFactory(
+            "AssetToken",
+            faris
+        );
+
+        await expect(
+            AssetToken.deploy(
+                "Luay Institutional Note",
+                "LIN",
+                await registry.getAddress(),
+                ethers.ZeroAddress,
+                luay.address,
+                faris.address
+            )
+        ).to.be.revertedWithCustomError(
+            AssetToken,
+            "InvalidAdmin"
+        );
+    });
+
+    it("rejects the zero address as issuer", async function () {
+        const { ethers } = await network.create();
+
+        const [faris] = await ethers.getSigners();
+
+        const IdentityRegistry = await ethers.getContractFactory(
+            "IdentityRegistry",
+            faris
+        );
+
+        const registry = await IdentityRegistry.deploy(faris.address);
+
+        const AssetToken = await ethers.getContractFactory(
+            "AssetToken",
+            faris
+        );
+
+        await expect(
+            AssetToken.deploy(
+                "Luay Institutional Note",
+                "LIN",
+                await registry.getAddress(),
+                faris.address,
+                ethers.ZeroAddress,
+                faris.address
+            )
+        ).to.be.revertedWithCustomError(
+            AssetToken,
+            "InvalidIssuer"
+        );
+    });
+
+    it("rejects the zero address as pauser", async function () {
+        const { ethers } = await network.create();
+
+        const [faris, luay] = await ethers.getSigners();
+
+        const IdentityRegistry = await ethers.getContractFactory(
+            "IdentityRegistry",
+            faris
+        );
+
+        const registry = await IdentityRegistry.deploy(faris.address);
+
+        const AssetToken = await ethers.getContractFactory(
+            "AssetToken",
+            faris
+        );
+
+        await expect(
+            AssetToken.deploy(
+                "Luay Institutional Note",
+                "LIN",
+                await registry.getAddress(),
+                faris.address,
+                luay.address,
+                ethers.ZeroAddress
+            )
+        ).to.be.revertedWithCustomError(
+            AssetToken,
+            "InvalidPauser"
+        );
+    });
+
+    it("prevents Luay from minting after losing the issuer role", async function () {
+        const {
+            faris,
+            wael,
+            luay,
+            tarik,
+            registry,
+            asset
+        } = await deployAssetToken();
+
+        const complianceRole = await registry.COMPLIANCE_ROLE();
+
+        await registry
+            .connect(faris)
+            .grantRole(complianceRole, wael.address);
+
+        await registry
+            .connect(wael)
+            .authorize(tarik.address);
+
+        const issuerRole = await asset.ISSUER_ROLE();
+
+        await asset
+            .connect(faris)
+            .revokeRole(issuerRole, luay.address);
+
+        await expect(
+            asset
+                .connect(luay)
+                .mint(tarik.address, 100n)
+        )
+            .to.be.revertedWithCustomError(
+                asset,
+                "AccessControlUnauthorizedAccount"
+            )
+            .withArgs(luay.address, issuerRole);
+    });
+
+    it("prevents Faris from pausing after losing the pauser role", async function () {
+        const {
+            faris,
+            asset
+        } = await deployAssetToken();
+
+        const pauserRole = await asset.PAUSER_ROLE();
+
+        await asset
+            .connect(faris)
+            .revokeRole(pauserRole, faris.address);
+
+        await expect(
+            asset
+                .connect(faris)
+                .pause()
+        )
+            .to.be.revertedWithCustomError(
+                asset,
+                "AccessControlUnauthorizedAccount"
+            )
+            .withArgs(faris.address, pauserRole);
     });
 });
