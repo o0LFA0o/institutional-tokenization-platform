@@ -4,17 +4,17 @@
 
 The Institutional Tokenization Platform provides modular infrastructure for issuing, holding, transferring, and settling permissioned digital financial assets.
 
-The initial system models a tokenized financial instrument exchanged against tokenized cash using atomic Delivery-versus-Payment (DvP).
+The current system models a permissioned tokenized financial instrument exchanged against tokenized cash using atomic Delivery-versus-Payment (DvP).
 
 The architecture prioritizes:
 
 - security
 - modularity
-- scalability
 - minimal on-chain state
 - narrow contract responsibilities
-- gas efficiency
+- gas-conscious design
 - auditability
+- explicit trust boundaries
 - replaceable components
 
 The system deliberately avoids unnecessary protocol complexity.
@@ -23,11 +23,11 @@ The system deliberately avoids unnecessary protocol complexity.
 
 ## 2. Core Architecture
 
-The initial protocol consists of four components:
+The protocol currently consists of four primary components.
 
 ### IdentityRegistry
 
-Maintains the minimum authorization state required to determine whether an address may participate in the system.
+Maintains the minimum authorization state required to determine whether an address may participate in permissioned asset transfers.
 
 Responsibilities:
 
@@ -35,72 +35,106 @@ Responsibilities:
 - revoke participants
 - expose participant authorization status
 - emit authorization state changes
+- restrict compliance operations through `COMPLIANCE_ROLE`
 
-It does not store personal KYC documents or sensitive identity information on-chain.
+The registry stores only authorization state.
+
+It does not store personal KYC documents, names, government identifiers, or other sensitive identity information on-chain.
 
 ### AssetToken
 
-Represents a permissioned tokenized financial asset.
+Represents a permissioned tokenized financial asset using ERC-20 semantics.
 
 Responsibilities:
 
 - represent asset ownership
-- mint authorized issuance
-- burn redeemed assets
-- enforce transfer restrictions
+- mint assets through `ISSUER_ROLE`
+- burn assets through `ISSUER_ROLE`
+- enforce participant transfer restrictions
 - support emergency pause controls
-- emit auditable token events
+- emit standard token events
 
-The token delegates participant eligibility decisions to the IdentityRegistry.
+The AssetToken delegates participant eligibility decisions to the IdentityRegistry.
+
+Normal transfers require both sender and recipient to be authorized.
+
+Minting requires the recipient to be authorized.
+
+Issuer-controlled burning remains possible when a holder has been revoked, allowing redemption or other issuer-controlled lifecycle actions without permitting the revoked holder to voluntarily transfer the asset.
 
 ### SettlementEngine
 
-Coordinates exchange of an AssetToken against an approved cash token.
+Coordinates atomic exchange of an ERC-20 asset against an ERC-20 cash leg.
 
 Responsibilities:
 
 - validate settlement instructions
-- verify participant eligibility
-- execute Delivery-versus-Payment
-- prevent invalid or duplicate settlement
-- emit settlement records
+- verify seller authorization using EIP-712 signatures
+- restrict execution to `SETTLER_ROLE`
+- execute Delivery-versus-Payment atomically
+- prevent duplicate settlement
+- protect settlement execution against reentrancy
+- interact with ERC-20 tokens using `SafeERC20`
+- emit settlement completion records
 
-The engine does not own identity state or asset lifecycle state.
+The SettlementEngine does not own participant identity state or asset lifecycle state.
+
+Participant eligibility is enforced by the AssetToken when the SettlementEngine attempts the asset transfer.
 
 ### MockCashToken
 
 Represents the cash leg during development and testing.
 
-It exists to model assets such as:
+It exists to model settlement behavior associated with instruments such as:
 
 - tokenized deposits
 - regulated stablecoins
 - wholesale settlement tokens
 - other tokenized cash instruments
 
-It is not intended to implement a production stablecoin system.
+It is not intended to implement a production stablecoin or deposit-token system.
+
+Its unrestricted minting behavior exists only to support testing.
 
 ---
 
 ## 3. Dependency Model
 
-Dependencies should remain directional and minimal.
+Dependencies remain directional and minimal.
 
+```text
 IdentityRegistry
-      |
-      v
+      ▲
+      │
+      │ authorization query
+      │
 AssetToken
 
-IdentityRegistry
-      |
-      v
-SettlementEngine
-      |
-      +---- AssetToken
-      |
-      +---- CashToken
 
-Contracts interact through narrow interfaces wherever practical.
+SettlementEngine
+      │
+      ├──── ERC-20 interaction ──── AssetToken
+      │
+      └──── ERC-20 interaction ──── MockCashToken
+```
+
+The SettlementEngine does not directly query the IdentityRegistry.
+
+Instead:
+
+```text
+SettlementEngine
+       │
+       │ attempts asset transfer
+       ▼
+AssetToken
+       │
+       │ checks eligibility
+       ▼
+IdentityRegistry
+```
+
+This keeps compliance enforcement inside the permissioned asset rather than duplicating identity logic inside the settlement layer.
 
 A component should depend on another component's required behavior rather than its complete implementation.
 
@@ -108,35 +142,45 @@ A component should depend on another component's required behavior rather than i
 
 ## 4. State Ownership
 
-Each piece of protocol state should have one authoritative owner.
+Each piece of protocol state has one authoritative owner.
 
 IdentityRegistry owns:
-- participant authorization
+
+- participant authorization state
+- compliance role assignments
 
 AssetToken owns:
+
 - balances
 - total supply
-- token transfer state
+- allowances
+- pause state
+- issuance and operational role assignments
 
 SettlementEngine owns:
+
 - settlement execution state
+- settlement role assignments
 
-CashToken owns:
-- cash balances and allowances
+MockCashToken owns:
 
-State should not be duplicated between modules unless a demonstrated security or performance requirement justifies it.
+- cash balances
+- allowances
+- total supply
+
+State is not duplicated between modules unless a demonstrated security or performance requirement justifies it.
 
 ---
 
 ## 5. Access Model
 
-The initial system separates operational authority from asset ownership.
-
-Potential roles include:
+The system separates operational authority from asset ownership.
 
 ### DEFAULT_ADMIN_ROLE
 
-Responsible for high-level administrative authority.
+Responsible for high-level role administration.
+
+In the modeled deployment, Faris acts as administrator.
 
 This role should be highly restricted in a production deployment.
 
@@ -144,15 +188,31 @@ This role should be highly restricted in a production deployment.
 
 May authorize or revoke participant eligibility.
 
+In the modeled workflow, Wa'el acts as the compliance operator.
+
 ### ISSUER_ROLE
 
-May perform permitted asset issuance operations.
+May mint and burn the permissioned asset.
+
+In the modeled workflow, Luay acts as issuer.
 
 ### PAUSER_ROLE
 
-May activate emergency controls where supported.
+May activate or remove emergency transfer restrictions.
 
-Role permissions should follow least privilege.
+In the modeled workflow, Faris holds the pausing authority.
+
+### SETTLER_ROLE
+
+May submit settlement transactions to the SettlementEngine.
+
+The settler is modeled as a separate institutional settlement operator.
+
+Holding `SETTLER_ROLE` does not authorize the operator to invent settlement terms on behalf of the seller.
+
+A valid seller signature is still required.
+
+Role permissions follow least privilege.
 
 No role should receive capabilities it does not require.
 
@@ -160,15 +220,38 @@ No role should receive capabilities it does not require.
 
 ## 6. Transfer Invariant
 
-A permissioned asset must never be transferred to an unauthorized participant.
+A permissioned asset must not be voluntarily transferred between unauthorized participants.
+
+For a normal transfer:
+
+```text
+sender authorized
+AND
+recipient authorized
+```
+
+must both be true.
+
+Minting and burning require separate treatment because the zero address is not a participant.
 
 Conceptually:
 
-transfer(A, B, amount)
+```text
+zero address → participant
+        mint
 
-is valid only when the protocol's authorization requirements for A and B are satisfied.
+participant → participant
+      transfer
 
-Minting and burning may require separate rules because the zero address is not a participant.
+participant → zero address
+        burn
+```
+
+The AssetToken applies the appropriate authorization rules to each operation.
+
+A revoked holder cannot voluntarily send the permissioned asset.
+
+The issuer may still burn assets from a revoked holder.
 
 ---
 
@@ -178,106 +261,274 @@ A successful DvP settlement must result in both economic legs completing as one 
 
 Before:
 
-Investor:
-- owns cash
-- does not own allocated asset
+```text
+Seller
+├── owns asset
+└── does not own settlement cash
 
-Seller/Issuer:
-- owns asset
-- does not own settlement cash
+Buyer
+├── owns cash
+└── does not own allocated asset
+```
 
-After:
+After successful settlement:
 
-Investor:
-- receives asset
+```text
+Seller
+└── receives cash
 
-Seller/Issuer:
-- receives cash
+Buyer
+└── receives asset
+```
 
-The protocol must not intentionally permit a completed state where only one required leg has settled.
+The fundamental invariant is:
 
-If either required transfer fails, the transaction must revert.
+```text
+ASSET LEG succeeds
+AND
+CASH LEG succeeds
+
+        OR
+
+ENTIRE TRANSACTION reverts
+```
+
+The protocol does not permit a persistent completed state where only one required leg has settled.
+
+If either transfer fails, Ethereum transaction atomicity rolls back all preceding state changes within the settlement transaction.
+
+This includes the settlement execution marker.
 
 ---
 
-## 8. Security Principles
+## 8. Signed Settlement Authorization
+
+Settlement authorization uses EIP-712 typed structured data.
+
+A settlement instruction contains:
+
+```solidity
+struct SettlementInstruction {
+    bytes32 settlementId;
+    address seller;
+    address buyer;
+    address assetToken;
+    address cashToken;
+    uint256 assetAmount;
+    uint256 cashAmount;
+}
+```
+
+The seller signs the exact structured instruction.
+
+The EIP-712 domain binds the signature to:
+
+- protocol name
+- protocol version
+- chain ID
+- SettlementEngine contract address
+
+The current domain identifies:
+
+```text
+name:    Institutional Tokenization Platform
+version: 1
+```
+
+Conceptually:
+
+```text
+SettlementInstruction
+          │
+          ▼
+   structured hash
+          │
+          +
+    EIP-712 domain
+          │
+          ▼
+     final digest
+          │
+          ▼
+   seller signature
+```
+
+During execution, the SettlementEngine reconstructs the digest and uses ECDSA recovery to determine which address produced the signature.
+
+Settlement requires:
+
+```text
+recovered signer == instruction.seller
+```
+
+Changing a signed settlement field changes the digest and therefore invalidates the original authorization.
+
+### Seller Authorization vs Token Approval
+
+These are deliberately separate concepts.
+
+The EIP-712 signature means:
+
+```text
+"The seller authorized these exact settlement terms."
+```
+
+ERC-20 approval means:
+
+```text
+"The token owner permits this contract to move up to this amount."
+```
+
+An allowance is not treated as a cryptographic signature over the complete settlement instruction.
+
+The current implementation uses seller-side EIP-712 authorization.
+
+The buyer authorizes movement of the cash leg through ERC-20 allowance but does not currently sign the complete settlement instruction.
+
+Bilateral signed authorization may be evaluated in a future version if required by the target institutional workflow.
+
+---
+
+## 9. Replay Protection
+
+Each settlement contains a unique `bytes32 settlementId`.
+
+The SettlementEngine maintains:
+
+```text
+settlementId → settled / unsettled
+```
+
+A successfully executed settlement ID cannot be executed again.
+
+Conceptually:
+
+```text
+First submission
+       │
+       ▼
+signature valid
+       │
+       ▼
+settlement executes
+       │
+       ▼
+settlementId = settled
+
+
+Second submission
+       │
+       ▼
+same settlementId
+       │
+       ▼
+AlreadySettled
+       │
+       ▼
+REVERT
+```
+
+Because the settlement marker is written inside the same atomic transaction as the asset and cash transfers, a failed settlement also rolls back that marker.
+
+A failed transaction therefore does not consume the settlement ID.
+
+---
+
+## 10. Security Principles
 
 ### Least Privilege
 
-Administrative capabilities are divided according to responsibility.
+Administrative, compliance, issuance, emergency, and settlement capabilities are separated according to responsibility.
 
-### Checks Before Effects
+### Signed Authorization
 
-Validate settlement requirements before committing protocol state changes where applicable.
+The seller cryptographically authorizes the exact settlement instruction using EIP-712.
+
+### Domain Separation
+
+Signatures are bound to an EIP-712 domain containing the chain ID and verifying SettlementEngine contract.
+
+This reduces the risk of interpreting the same signature in an unintended execution domain.
 
 ### Atomicity
 
-Multi-leg settlement operations execute within one transaction when atomic settlement is required.
+Both economic legs execute within one Ethereum transaction.
 
-### Minimal External Calls
+Failure of either leg reverts the complete settlement.
 
-External interactions should be minimized and explicitly understood.
+### Replay Protection
+
+Successfully executed settlement IDs cannot be reused.
 
 ### Reentrancy Protection
 
-Functions involving external token interactions must be evaluated for reentrancy risk.
+Settlement execution uses OpenZeppelin `ReentrancyGuard`.
 
 ### Safe Token Interaction
 
-ERC-20 interactions should use safe transfer mechanisms where appropriate.
+ERC-20 settlement operations use OpenZeppelin `SafeERC20`.
+
+### Permissioned Transfers
+
+AssetToken enforces participant eligibility through IdentityRegistry.
 
 ### Emergency Controls
 
-Critical asset operations may support controlled pausing without creating unnecessary centralized authority.
+AssetToken supports role-controlled pausing.
+
+### Minimal External Calls
+
+External token interactions are kept narrow and explicit.
 
 ### No Sensitive Identity Data On-Chain
 
-Participant authorization should reference eligibility, not expose underlying KYC documentation.
+The protocol stores participant authorization status rather than underlying KYC documentation.
 
 ---
 
-## 9. Efficiency Principles
+## 11. Efficiency and Modularity
 
-The protocol should favor constant-time state lookups.
+The protocol favors constant-time state lookups.
 
-Preferred:
+Examples:
 
-address -> authorization status
+```text
+address → authorization status
 
-Avoid:
+bytes32 → settlement execution status
+```
 
-iterating through participant arrays to determine authorization.
+The system avoids iterating through participant arrays to determine authorization.
 
-Storage writes should be minimized because persistent EVM storage is expensive.
+Persistent storage writes are minimized where possible.
 
-Events should be used for historical observability where state does not need to remain directly accessible to other contracts.
+Events provide historical observability when information does not need to remain directly accessible as contract state.
 
----
+Modules communicate through narrow responsibilities.
 
-## 10. Modularity
+For example, AssetToken only needs to ask:
 
-Modules communicate through stable interfaces.
-
-For example, AssetToken should need to know:
-
+```text
 "is this account authorized?"
+```
 
-It should not need to know:
+It does not need to know:
 
 - how KYC was performed
-- which company performed KYC
-- where documentation is stored
+- which organization performed KYC
+- where documents are stored
+- why a participant was approved
 - how institutional credentials were issued
 
-This allows the identity implementation to evolve without redesigning the asset contract.
+This allows identity and compliance infrastructure to evolve independently from asset ownership logic.
 
 ---
 
-## 11. Upgrade Philosophy
+## 12. Upgrade Philosophy
 
-The initial implementation will favor simple, non-upgradeable contracts.
+Version 0.1 uses simple, non-upgradeable contracts.
 
-Upgradeability introduces additional:
+Proxy upgradeability introduces additional:
 
 - trust assumptions
 - storage-layout risks
@@ -285,60 +536,112 @@ Upgradeability introduces additional:
 - attack surface
 - audit requirements
 
-Modularity should provide replaceability at the system level before proxy-based upgradeability is introduced.
+The initial architecture favors explicit execution paths and smaller trust assumptions.
 
-Upgrade mechanisms should only be added when a concrete requirement justifies them.
+Modularity provides system-level replaceability before proxy-based upgradeability is introduced.
 
----
-
-## 12. Initial Transaction
-
-The first end-to-end scenario will model:
-
-1. An administrator configures the protocol.
-2. An authorized compliance operator approves an institutional investor.
-3. An issuer creates a tokenized financial asset.
-4. The investor receives or acquires settlement cash.
-5. A settlement instruction exchanges cash for the asset.
-6. The SettlementEngine validates the transaction.
-7. Cash and asset transfers execute atomically.
-8. Settlement events provide an auditable record.
+Upgrade mechanisms should only be added when a concrete operational requirement justifies them.
 
 ---
 
-## 13. Initial Security Invariants
+## 13. Implemented Transaction and Security Invariants
 
-The test suite must eventually demonstrate that:
+The current end-to-end transaction models:
+
+```text
+1. Faris configures protocol roles.
+
+2. Wa'el authorizes Luay and Tarik.
+
+3. Luay issues the permissioned NOTE asset.
+
+4. Luay holds NOTE.
+
+5. Tarik holds the mock cash asset.
+
+6. Token owners approve the SettlementEngine
+   for the required token movement.
+
+7. Luay signs the exact SettlementInstruction
+   using EIP-712.
+
+8. An authorized settlement operator submits:
+   instruction + signature.
+
+9. SettlementEngine verifies the seller signature.
+
+10. SettlementEngine attempts the asset leg.
+
+11. AssetToken checks participant eligibility
+    through IdentityRegistry.
+
+12. NOTE moves from Luay to Tarik.
+
+13. Cash moves from Tarik to Luay.
+
+14. The settlement ID is marked executed.
+
+15. If any required operation fails,
+    the entire transaction rolls back.
+```
+
+The current test suite demonstrates:
 
 1. Unauthorized addresses cannot receive permissioned assets.
 2. Unauthorized callers cannot issue assets.
-3. Revoked participants cannot perform restricted operations.
-4. Paused asset operations behave according to policy.
-5. Settlement cannot execute without sufficient asset balance.
-6. Settlement cannot execute without sufficient cash balance.
-7. Settlement cannot execute without required approvals.
+3. Revoked participants cannot perform restricted transfers.
+4. Paused asset operations are blocked.
+5. Settlement fails without sufficient asset balance.
+6. Settlement fails without sufficient cash balance.
+7. Settlement fails without required token approvals.
 8. Failed settlement does not leave one economic leg completed.
-9. Duplicate settlement instructions cannot settle twice where instruction identifiers are used.
+9. Duplicate settlement IDs cannot execute twice.
 10. Administrative operations respect assigned roles.
+11. Unauthorized callers cannot execute settlement.
+12. Role revocation removes the associated operational capability.
+13. Issuer-controlled burning from a revoked holder remains possible.
+14. EIP-712 signed settlement authorization is enforced by the SettlementEngine.
+
+The current complete test suite contains:
+
+```text
+64 passing tests
+0 failing tests
+```
 
 ---
 
 ## 14. Non-Goals for Version 0.1
 
-Version 0.1 will not attempt to implement:
+Version 0.1 does not attempt to implement:
 
 - complete KYC infrastructure
 - production custody infrastructure
+- HSM or MPC key management
 - cross-chain interoperability
 - proxy upgradeability
 - privacy-preserving identity
 - complex corporate actions
 - production stablecoin issuance
+- production tokenized-deposit issuance
 - order books
+- matching engines
 - AMMs
 - lending markets
 - governance tokens
 - yield farming
 - unnecessary frontend infrastructure
 
-These features may be evaluated later only when justified by an institutional use case.
+Potential future areas include:
+
+- bilateral signed settlement authorization
+- settlement expiration or deadlines
+- EIP-1271 institutional smart-wallet signatures
+- richer settlement audit events
+- expanded role-lifecycle controls
+- asset lifecycle functionality
+- corporate actions
+- deployment tooling
+- additional security documentation
+
+These features should only be introduced when a concrete institutional requirement justifies their additional complexity.
