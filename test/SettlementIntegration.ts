@@ -1,11 +1,71 @@
 import { expect } from "chai";
 import { network } from "hardhat";
-import { AssetToken__factory, IdentityRegistry__factory, MockCashToken__factory, SettlementEngine__factory } from "../types/ethers-contracts/index.js";
-import { EtherSymbol } from "ethers";
-import { threadCpuUsage } from "process";
 
 describe("Settlement Integration", function () {
-    it("settles asset and cash atomically", async function () {
+    async function signSettlementInstruction(
+        signer: any,
+        settlementEngine: any,
+        instruction: any
+    ) {
+        const networkInfo =
+            await signer.provider.getNetwork();
+
+        const domain = {
+            name: "Institutional Tokenization Platform",
+            version: "1",
+            chainId: networkInfo.chainId,
+            verifyingContract:
+                await settlementEngine.getAddress(),
+        };
+
+        const types = {
+            SettlementInstruction: [
+                {
+                    name: "settlementId",
+                    type: "bytes32",
+                },
+                {
+                    name: "seller",
+                    type: "address",
+                },
+                {
+                    name: "buyer",
+                    type: "address",
+                },
+                {
+                    name: "assetToken",
+                    type: "address",
+                },
+                {
+                    name: "cashToken",
+                    type: "address",
+                },
+                {
+                    name: "assetAmount",
+                    type: "uint256",
+                },
+                {
+                    name: "cashAmount",
+                    type: "uint256",
+                },
+            ],
+        };
+
+        return signer.signTypedData(
+            domain,
+            types,
+            instruction
+        );
+    }
+
+    async function deployIntegrationFixture({
+        assetMint = 100n,
+        cashMint = 1000n,
+        assetApproval = 100n,
+        cashApproval = 1000n,
+        approveAsset = true,
+        approveCash = true,
+    } = {}) {
         const { ethers } = await network.create();
 
         const [
@@ -17,1169 +77,848 @@ describe("Settlement Integration", function () {
         ] = await ethers.getSigners();
 
         // 1. Deploy identity registry
-        const IdentityRegistry = await ethers.getContractFactory(
-            "IdentityRegistry"
-        );
+        const IdentityRegistry =
+            await ethers.getContractFactory(
+                "IdentityRegistry"
+            );
 
-        const identityRegistry = await IdentityRegistry.deploy(
-            faris.address
-        );
+        const identityRegistry =
+            await IdentityRegistry.deploy(
+                faris.address
+            );
 
-        const complianceRole = 
+        const complianceRole =
             await identityRegistry.COMPLIANCE_ROLE();
-        
-        await identityRegistry
-                .connect(faris)
-                .grantRole(complianceRole, wael.address);
 
         await identityRegistry
-                .connect(wael)
-                .authorize(luay.address);
+            .connect(faris)
+            .grantRole(
+                complianceRole,
+                wael.address
+            );
+
+        await identityRegistry
+            .connect(wael)
+            .authorize(luay.address);
 
         await identityRegistry
             .connect(wael)
             .authorize(tarik.address);
-        
-        // 2. Deploy permissioned asset token
-        const AssetToken = await ethers.getContractFactory(
-            "AssetToken"
-        );
 
-        const assetToken = await AssetToken.deploy(
-            "Institutional Note",
-            "NOTE",
-            await identityRegistry.getAddress(),
-            faris.address,
-            luay.address,
-            faris.address
-        );
+        // 2. Deploy permissioned asset token
+        const AssetToken =
+            await ethers.getContractFactory(
+                "AssetToken"
+            );
+
+        const assetToken =
+            await AssetToken.deploy(
+                "Institutional Note",
+                "NOTE",
+                await identityRegistry.getAddress(),
+                faris.address,
+                luay.address,
+                faris.address
+            );
 
         // 3. Deploy mock cash token
+        const MockCashToken =
+            await ethers.getContractFactory(
+                "MockCashToken"
+            );
 
-        const MockCashToken = await ethers.getContractFactory(
-            "MockCashToken"
-        );
-
-        const cashToken = await MockCashToken.deploy();
+        const cashToken =
+            await MockCashToken.deploy();
 
         // 4. Deploy settlement engine
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
-
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
-
-        // 5. Give Luay the asset
-        await assetToken
-            .connect(luay)
-            .mint(
-                luay.address,
-                100n
+        const SettlementEngine =
+            await ethers.getContractFactory(
+                "SettlementEngine"
             );
 
-        // 6. Give Tarik the cash
-
-        await cashToken.mint(
-            tarik.address,
-            1000n
-        );
-
-        // 7. Approve SettlementEngine
-        await assetToken
-            .connect(luay)
-            .approve(
-                await settlementEngine.getAddress(),
-                100n
+        const settlementEngine =
+            await SettlementEngine.deploy(
+                faris.address,
+                settler.address
             );
 
-        await cashToken
-            .connect(tarik)
-            .approve(
-                await settlementEngine.getAddress(),
-                1000n
+        // 5. Mint asset to Luay
+        if (assetMint > 0n) {
+            await assetToken
+                .connect(luay)
+                .mint(
+                    luay.address,
+                    assetMint
+                );
+        }
+
+        // 6. Mint cash to Tarik
+        if (cashMint > 0n) {
+            await cashToken.mint(
+                tarik.address,
+                cashMint
             );
+        }
 
-        // 8. Build settlement instruction
-        const settlementId = 
-            ethers.id("SETTLEMENT _001");
+        // 7. Approvals
+        if (approveAsset) {
+            await assetToken
+                .connect(luay)
+                .approve(
+                    await settlementEngine.getAddress(),
+                    assetApproval
+                );
+        }
 
-        const instruction = {
-            settlementId,
-            seller: luay.address,
-            buyer: tarik.address,
-            assetToken: await assetToken.getAddress(),
-            cashToken: await cashToken.getAddress(),
-            assetAmount: 100n,
-            cashAmount: 1000n,
-        };
+        if (approveCash) {
+            await cashToken
+                .connect(tarik)
+                .approve(
+                    await settlementEngine.getAddress(),
+                    cashApproval
+                );
+        }
 
-        // 9. Execute settlement
-        await settlementEngine
-            .connect(settler)
-            .settle(instruction);
-
-        // 10. Verify final balances
-        expect(
-            await assetToken.balanceOf(luay.address)
-        ).to.equal(0n);
-
-        expect(
-            await assetToken.balanceOf(tarik.address)
-        ).to.equal(100n);
-
-        expect(
-            await cashToken.balanceOf(tarik.address)
-        ).to.equal(0n);
-
-        expect(
-            await cashToken.balanceOf(luay.address)
-        ).to.equal(1000n);
-
-        expect(
-            await settlementEngine.isSettled(settlementId)
-        ).to.equal(true);
-    });
-
-    it("reverts the entire settlement if the cash leg fails", async function () {
-        const { ethers } = await network.create();
-
-        const [
+        return {
+            ethers,
             faris,
             wael,
             settler,
             luay,
             tarik,
-        ] = await ethers.getSigners();
-
-        const IdentityRegistry = await ethers.getContractFactory(
-            "IdentityRegistry"
-        );
-        
-        const identityRegistry = await IdentityRegistry.deploy(
-            faris.address
-        );
-
-        const complianceRole = 
-            await identityRegistry.COMPLIANCE_ROLE();
-
-        await identityRegistry
-            .connect(faris)
-            .grantRole(complianceRole, wael.address);
-
-        await identityRegistry
-            .connect(wael)
-            .authorize(luay.address);
-
-        await identityRegistry
-            .connect(wael)
-            .authorize(tarik.address);
-
-        const AssetToken = await ethers.getContractFactory(
-            "AssetToken"
-        );
-
-        const assetToken = await AssetToken.deploy(
-            "Institutional Note",
-            "NOTE",
-            await identityRegistry.getAddress(),
-            faris.address,
-            luay.address,
-            faris.address
-        );
-
-        const MockCashToken = await ethers.getContractFactory(
-            "MockCashToken"
-        );
-
-        const cashToken = await MockCashToken.deploy();
-
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
-
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
-
-        await assetToken
-            .connect(luay)
-            .mint(
-                luay.address,
-                100n
-            );
-
-        // Tarik only gets 500, but settlement requires 1000.
-        await cashToken.mint(
-            tarik.address,
-            500n
-        );
-
-        await assetToken
-            .connect(luay)
-            .approve(
-                await settlementEngine.getAddress(),
-                100n
-            );
-        
-        await cashToken
-            .connect(tarik)
-            .approve(
-                await settlementEngine.getAddress(),
-                1000n
-            );
-        
-        const settlementId = 
-            ethers.id("SETTLEMENT_002");
-
-        const instruction = {
-            settlementId,
-            seller: luay.address,
-            buyer: tarik.address,
-            assetToken: await assetToken.getAddress(),
-            cashToken: await cashToken.getAddress(),
-            assetAmount: 100n,
-            cashAmount: 1000n,
+            identityRegistry,
+            assetToken,
+            cashToken,
+            settlementEngine,
         };
+    }
 
-        await expect(
-            settlementEngine
+    function buildInstruction(
+        settlementId: string,
+        seller: string,
+        buyer: string,
+        assetToken: string,
+        cashToken: string,
+        assetAmount = 100n,
+        cashAmount = 1000n
+    ) {
+        return {
+            settlementId,
+            seller,
+            buyer,
+            assetToken,
+            cashToken,
+            assetAmount,
+            cashAmount,
+        };
+    }
+
+    it(
+        "settles asset and cash atomically",
+        async function () {
+            const {
+                ethers,
+                settler,
+                luay,
+                tarik,
+                assetToken,
+                cashToken,
+                settlementEngine,
+            } = await deployIntegrationFixture();
+
+            const settlementId =
+                ethers.id("SETTLEMENT_001");
+
+            const instruction =
+                buildInstruction(
+                    settlementId,
+                    luay.address,
+                    tarik.address,
+                    await assetToken.getAddress(),
+                    await cashToken.getAddress()
+                );
+
+            const signature =
+                await signSettlementInstruction(
+                    luay,
+                    settlementEngine,
+                    instruction
+                );
+
+            await settlementEngine
                 .connect(settler)
-                .settle(instruction)
-        ).to.revert(ethers);
+                .settle(
+                    instruction,
+                    signature
+                );
 
-        expect(
-            await assetToken.balanceOf(luay.address)
-        ).to.equal(100n);
+            expect(
+                await assetToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(0n);
 
-        expect(
-            await assetToken.balanceOf(tarik.address)
-        ).to.equal(0n);
+            expect(
+                await assetToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(100n);
 
-        expect(
-            await cashToken.balanceOf(tarik.address)
-        ).to.equal(500n);
+            expect(
+                await cashToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(0n);
 
-        expect(
-            await cashToken.balanceOf(luay.address)
-        ).to.equal(0n);
+            expect(
+                await cashToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(1000n);
 
-        expect(
-            await settlementEngine.isSettled(settlementId)
-        ).to.equal(false);
-    });
+            expect(
+                await settlementEngine.isSettled(
+                    settlementId
+                )
+            ).to.equal(true);
+        }
+    );
 
-    it("reverts the entire settlement if the asset leg fails", async function () {
-        const { ethers } = await network.create();
+    it(
+        "reverts the entire settlement if the cash leg fails",
+        async function () {
+            const {
+                ethers,
+                settler,
+                luay,
+                tarik,
+                assetToken,
+                cashToken,
+                settlementEngine,
+            } = await deployIntegrationFixture({
+                cashMint: 500n,
+                cashApproval: 1000n,
+            });
 
-        const [
-            faris,
-            wael,
-            settler,
-            luay,
-            tarik,
-        ] = await ethers.getSigners();
+            const settlementId =
+                ethers.id("SETTLEMENT_002");
 
-        const IdentityRegistry = await ethers.getContractFactory(
-            "IdentityRegistry"
-        );
+            const instruction =
+                buildInstruction(
+                    settlementId,
+                    luay.address,
+                    tarik.address,
+                    await assetToken.getAddress(),
+                    await cashToken.getAddress()
+                );
 
-        const identityRegistry = await IdentityRegistry.deploy(
-            faris.address
-        );
+            const signature =
+                await signSettlementInstruction(
+                    luay,
+                    settlementEngine,
+                    instruction
+                );
 
-        const complianceRole =
-            await identityRegistry.COMPLIANCE_ROLE();
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        instruction,
+                        signature
+                    )
+            ).to.be.revert(ethers);
 
-        await identityRegistry
-            .connect(faris)
-            .grantRole(complianceRole, wael.address);
+            expect(
+                await assetToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(100n);
 
-        await identityRegistry
-            .connect(wael)
-            .authorize(luay.address);
+            expect(
+                await assetToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(0n);
 
-        await identityRegistry
-            .connect(wael)
-            .authorize(tarik.address);
+            expect(
+                await cashToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(500n);
 
-        const AssetToken = await ethers.getContractFactory(
-            "AssetToken"
-        );
+            expect(
+                await cashToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(0n);
 
-        const assetToken = await AssetToken.deploy(
-            "Institutional Note",
-            "NOTE",
-            await identityRegistry.getAddress(),
-            faris.address,
-            luay.address,
-            faris.address
-        );
+            expect(
+                await settlementEngine.isSettled(
+                    settlementId
+                )
+            ).to.equal(false);
+        }
+    );
 
-        const MockCashToken = await ethers.getContractFactory(
-            "MockCashToken"
-        );
+    it(
+        "reverts the entire settlement if the asset leg fails",
+        async function () {
+            const {
+                ethers,
+                settler,
+                luay,
+                tarik,
+                assetToken,
+                cashToken,
+                settlementEngine,
+            } = await deployIntegrationFixture({
+                assetMint: 0n,
+            });
 
-        const cashToken = await MockCashToken.deploy();
-
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
-
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
-
-        // Tarik has enough cash.
-        await cashToken.mint(
-            tarik.address,
-            1000n
-        );
-
-        await assetToken
-            .connect(luay)
-            .approve(
-                await settlementEngine.getAddress(),
-                100n
-            );
-
-        await cashToken
-            .connect(tarik)
-            .approve(
-                await settlementEngine.getAddress(),
-                1000n
-            );
-        
-            const settlementId = 
+            const settlementId =
                 ethers.id("SETTLEMENT_003");
 
-            const instruction = {
-                settlementId,
-                seller: luay.address,
-                buyer: tarik.address,
-                assetToken: await assetToken.getAddress(),
-                cashToken: await cashToken.getAddress(),
-                assetAmount: 100n,
-                cashAmount: 1000n,
-            };
+            const instruction =
+                buildInstruction(
+                    settlementId,
+                    luay.address,
+                    tarik.address,
+                    await assetToken.getAddress(),
+                    await cashToken.getAddress()
+                );
 
-        await expect(
-            settlementEngine
+            const signature =
+                await signSettlementInstruction(
+                    luay,
+                    settlementEngine,
+                    instruction
+                );
+
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        instruction,
+                        signature
+                    )
+            ).to.be.revert(ethers);
+
+            expect(
+                await assetToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(0n);
+
+            expect(
+                await assetToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(0n);
+
+            expect(
+                await cashToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(1000n);
+
+            expect(
+                await cashToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(0n);
+
+            expect(
+                await settlementEngine.isSettled(
+                    settlementId
+                )
+            ).to.equal(false);
+        }
+    );
+
+    it(
+        "reverts settlement if the seller has not approved the asset transfer",
+        async function () {
+            const {
+                ethers,
+                settler,
+                luay,
+                tarik,
+                assetToken,
+                cashToken,
+                settlementEngine,
+            } = await deployIntegrationFixture({
+                approveAsset: false,
+            });
+
+            const settlementId =
+                ethers.id("SETTLEMENT_004");
+
+            const instruction =
+                buildInstruction(
+                    settlementId,
+                    luay.address,
+                    tarik.address,
+                    await assetToken.getAddress(),
+                    await cashToken.getAddress()
+                );
+
+            const signature =
+                await signSettlementInstruction(
+                    luay,
+                    settlementEngine,
+                    instruction
+                );
+
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        instruction,
+                        signature
+                    )
+            ).to.be.revert(ethers);
+
+            expect(
+                await assetToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(100n);
+
+            expect(
+                await assetToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(0n);
+
+            expect(
+                await cashToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(1000n);
+
+            expect(
+                await cashToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(0n);
+
+            expect(
+                await settlementEngine.isSettled(
+                    settlementId
+                )
+            ).to.equal(false);
+        }
+    );
+
+    it(
+        "reverts settlement if the buyer has not approved the cash transfer",
+        async function () {
+            const {
+                ethers,
+                settler,
+                luay,
+                tarik,
+                assetToken,
+                cashToken,
+                settlementEngine,
+            } = await deployIntegrationFixture({
+                approveCash: false,
+            });
+
+            const settlementId =
+                ethers.id("SETTLEMENT_005");
+
+            const instruction =
+                buildInstruction(
+                    settlementId,
+                    luay.address,
+                    tarik.address,
+                    await assetToken.getAddress(),
+                    await cashToken.getAddress()
+                );
+
+            const signature =
+                await signSettlementInstruction(
+                    luay,
+                    settlementEngine,
+                    instruction
+                );
+
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        instruction,
+                        signature
+                    )
+            ).to.be.revert(ethers);
+
+            expect(
+                await assetToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(100n);
+
+            expect(
+                await assetToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(0n);
+
+            expect(
+                await cashToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(1000n);
+
+            expect(
+                await cashToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(0n);
+
+            expect(
+                await settlementEngine.isSettled(
+                    settlementId
+                )
+            ).to.equal(false);
+        }
+    );
+
+    it(
+        "reverts settlement if the buyer is no longer authorized",
+        async function () {
+            const {
+                ethers,
+                wael,
+                settler,
+                luay,
+                tarik,
+                identityRegistry,
+                assetToken,
+                cashToken,
+                settlementEngine,
+            } = await deployIntegrationFixture();
+
+            await identityRegistry
+                .connect(wael)
+                .revoke(tarik.address);
+
+            const settlementId =
+                ethers.id("SETTLEMENT_006");
+
+            const instruction =
+                buildInstruction(
+                    settlementId,
+                    luay.address,
+                    tarik.address,
+                    await assetToken.getAddress(),
+                    await cashToken.getAddress()
+                );
+
+            const signature =
+                await signSettlementInstruction(
+                    luay,
+                    settlementEngine,
+                    instruction
+                );
+
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        instruction,
+                        signature
+                    )
+            ).to.be.revert(ethers);
+
+            expect(
+                await assetToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(100n);
+
+            expect(
+                await assetToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(0n);
+
+            expect(
+                await cashToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(1000n);
+
+            expect(
+                await cashToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(0n);
+
+            expect(
+                await settlementEngine.isSettled(
+                    settlementId
+                )
+            ).to.equal(false);
+        }
+    );
+
+    it(
+        "reverts settlement if the seller is no longer authorized",
+        async function () {
+            const {
+                ethers,
+                wael,
+                settler,
+                luay,
+                tarik,
+                identityRegistry,
+                assetToken,
+                cashToken,
+                settlementEngine,
+            } = await deployIntegrationFixture();
+
+            await identityRegistry
+                .connect(wael)
+                .revoke(luay.address);
+
+            const settlementId =
+                ethers.id("SETTLEMENT_007");
+
+            const instruction =
+                buildInstruction(
+                    settlementId,
+                    luay.address,
+                    tarik.address,
+                    await assetToken.getAddress(),
+                    await cashToken.getAddress()
+                );
+
+            /*
+             * Important:
+             * Luay can still cryptographically sign even though
+             * compliance has revoked his transfer eligibility.
+             */
+            const signature =
+                await signSettlementInstruction(
+                    luay,
+                    settlementEngine,
+                    instruction
+                );
+
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        instruction,
+                        signature
+                    )
+            ).to.be.revert(ethers);
+
+            expect(
+                await assetToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(100n);
+
+            expect(
+                await assetToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(0n);
+
+            expect(
+                await cashToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(1000n);
+
+            expect(
+                await cashToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(0n);
+
+            expect(
+                await settlementEngine.isSettled(
+                    settlementId
+                )
+            ).to.equal(false);
+        }
+    );
+
+    it(
+        "reverts settlement if the asset token is paused",
+        async function () {
+            const {
+                ethers,
+                faris,
+                settler,
+                luay,
+                tarik,
+                assetToken,
+                cashToken,
+                settlementEngine,
+            } = await deployIntegrationFixture();
+
+            await assetToken
+                .connect(faris)
+                .pause();
+
+            const settlementId =
+                ethers.id("SETTLEMENT_008");
+
+            const instruction =
+                buildInstruction(
+                    settlementId,
+                    luay.address,
+                    tarik.address,
+                    await assetToken.getAddress(),
+                    await cashToken.getAddress()
+                );
+
+            const signature =
+                await signSettlementInstruction(
+                    luay,
+                    settlementEngine,
+                    instruction
+                );
+
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        instruction,
+                        signature
+                    )
+            ).to.be.revert(ethers);
+
+            expect(
+                await assetToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(100n);
+
+            expect(
+                await assetToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(0n);
+
+            expect(
+                await cashToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(1000n);
+
+            expect(
+                await cashToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(0n);
+
+            expect(
+                await settlementEngine.isSettled(
+                    settlementId
+                )
+            ).to.equal(false);
+        }
+    );
+
+    it(
+        "prevents the same settlement from being executed twice",
+        async function () {
+            const {
+                ethers,
+                settler,
+                luay,
+                tarik,
+                assetToken,
+                cashToken,
+                settlementEngine,
+            } = await deployIntegrationFixture({
+                assetMint: 200n,
+                cashMint: 2000n,
+                assetApproval: 200n,
+                cashApproval: 2000n,
+            });
+
+            const settlementId =
+                ethers.id("SETTLEMENT_009");
+
+            const instruction =
+                buildInstruction(
+                    settlementId,
+                    luay.address,
+                    tarik.address,
+                    await assetToken.getAddress(),
+                    await cashToken.getAddress()
+                );
+
+            const signature =
+                await signSettlementInstruction(
+                    luay,
+                    settlementEngine,
+                    instruction
+                );
+
+            // First execution succeeds.
+            await settlementEngine
                 .connect(settler)
-                .settle(instruction)
-        ).to.revert(ethers);
-
-        expect(
-            await assetToken.balanceOf(luay.address)
-        ).to.equal(0n);
-
-        expect(
-            await assetToken.balanceOf(tarik.address)
-        ).to.equal(0n);
-
-        expect(
-            await cashToken.balanceOf(tarik.address)
-        ).to.equal(1000n);
-
-        expect(
-            await cashToken.balanceOf(luay.address)
-        ).to.equal(0n);
-
-        expect(
-            await settlementEngine.isSettled(settlementId)
-        ).to.equal(false);
-    });
-
-    it("reverts settlement if the seller has not approved the asset transfer", async function () {
-        const { ethers } = await network.create();
-
-        const [
-            faris,
-            wael,
-            settler,
-            luay,
-            tarik,
-        ] = await ethers.getSigners();
-
-        const IdentityRegistry = await ethers.getContractFactory(
-            "IdentityRegistry"
-        );
-
-        const identityRegistry = await IdentityRegistry.deploy(
-            faris.address
-        );
-
-        const complianceRole =
-            await identityRegistry.COMPLIANCE_ROLE();
-
-        await identityRegistry
-            .connect(faris)
-            .grantRole(complianceRole, wael.address);
-
-        await identityRegistry
-            .connect(wael)
-            .authorize(luay.address);
-
-        await identityRegistry
-            .connect(wael)
-            .authorize(tarik.address);
-
-        const AssetToken = await ethers.getContractFactory(
-            "AssetToken"
-        );
-
-        const assetToken = await AssetToken.deploy(
-            "Institutional Note",
-            "NOTE",
-            await identityRegistry.getAddress(),
-            faris.address,
-            luay.address,
-            faris.address
-        );
-
-        const MockCashToken = await ethers.getContractFactory(
-            "MockCashToken"
-        );
-
-        const cashToken = await MockCashToken.deploy();
-
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
-
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
-
-        // Luay has enough NOTE.
-        await assetToken
-            .connect(luay)
-            .mint(
-                luay.address,
-                100n
-            );
-
-        // Tarik has enough cash.
-        await cashToken.mint(
-            tarik.address,
-            1000n
-        );
-
-        // IMPORTANT:
-        // Luay does NOT approve the SettlementEngine.
-
-        // Tarik does approve his cash.
-        await cashToken
-            .connect(tarik)
-            .approve(
-                await settlementEngine.getAddress(),
-                1000n
-            );
-
-        const settlementId =
-            ethers.id("SETTLEMENT_004");
-
-        const instruction = {
-            settlementId,
-            seller: luay.address,
-            buyer: tarik.address,
-            assetToken: await assetToken.getAddress(),
-            cashToken: await cashToken.getAddress(),
-            assetAmount: 100n,
-            cashAmount: 1000n,
-        };
-
-        await expect(
-            settlementEngine
-                .connect(settler)
-                .settle(instruction)
-        ).to.revert(ethers);
-
-        expect(
-            await assetToken.balanceOf(luay.address)
-        ).to.equal(100n);
-
-        expect(
-            await assetToken.balanceOf(tarik.address)
-        ).to.equal(0n);
-
-        expect(
-            await cashToken.balanceOf(tarik.address)
-        ).to.equal(1000n);
-
-        expect(
-            await cashToken.balanceOf(luay.address)
-        ).to.equal(0n);
-
-        expect(
-            await settlementEngine.isSettled(settlementId)
-        ).to.equal(false);
-    });
-
-    it("reverts settlement if the buyer has not approved the cash transfer", async function () {
-        const { ethers } = await network.create();
-
-        const [
-            faris,
-            wael,
-            settler,
-            luay,
-            tarik,
-        ] = await ethers.getSigners();
-
-        const IdentityRegistry = await ethers.getContractFactory(
-            "IdentityRegistry"
-        );
-
-        const identityRegistry = await IdentityRegistry.deploy(
-            faris.address
-        );
-
-        const complianceRole =
-            await identityRegistry.COMPLIANCE_ROLE();
-
-        await identityRegistry
-            .connect(faris)
-            .grantRole(complianceRole, wael.address);
-
-        await identityRegistry
-            .connect(wael)
-            .authorize(luay.address);
-
-        await identityRegistry
-            .connect(wael)
-            .authorize(tarik.address);
-
-        const AssetToken = await ethers.getContractFactory(
-            "AssetToken"
-        );
-
-        const assetToken = await AssetToken.deploy(
-            "Institutional Note",
-            "NOTE",
-            await identityRegistry.getAddress(),
-            faris.address,
-            luay.address,
-            faris.address
-        );
-
-        const MockCashToken = await ethers.getContractFactory(
-            "MockCashToken"
-        );
-
-        const cashToken = await MockCashToken.deploy();
-
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
-
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
-
-        await assetToken
-            .connect(luay)
-            .mint(
-                luay.address,
-                100n
-            );
-
-        await cashToken.mint(
-            tarik.address,
-            1000n
-        );
-
-        // Luay approves the asset transfer.
-        await assetToken
-            .connect(luay)
-            .approve(
-                await settlementEngine.getAddress(),
-                100n
-            );
-
-        // IMPORTANT:
-        // Tarik does NOT approve the SettlementEngine.
-
-        const settlementId =
-            ethers.id("SETTLEMENT_005");
-
-        const instruction = {
-            settlementId,
-            seller: luay.address,
-            buyer: tarik.address,
-            assetToken: await assetToken.getAddress(),
-            cashToken: await cashToken.getAddress(),
-            assetAmount: 100n,
-            cashAmount: 1000n,
-        };
-
-        await expect(
-            settlementEngine
-                .connect(settler)
-                .settle(instruction)
-        ).to.revert(ethers);
-
-        expect(
-            await assetToken.balanceOf(luay.address)
-        ).to.equal(100n);
-
-        expect(
-            await assetToken.balanceOf(tarik.address)
-        ).to.equal(0n);
-
-        expect(
-            await cashToken.balanceOf(tarik.address)
-        ).to.equal(1000n);
-
-        expect(
-            await cashToken.balanceOf(luay.address)
-        ).to.equal(0n);
-
-        expect(
-            await settlementEngine.isSettled(settlementId)
-        ).to.equal(false);
-    });
-
-    it("reverts settlement if the buyer is no longer authorized", async function () {
-        const { ethers } = await network.create();
-
-        const [
-            faris,
-            wael,
-            settler,
-            luay,
-            tarik,
-        ] = await ethers.getSigners();
-
-        const IdentityRegistry = await ethers.getContractFactory(
-            "IdentityRegistry"
-        );
-
-        const identityRegistry = await IdentityRegistry.deploy(
-            faris.address
-        );
-
-        const complianceRole =
-            await identityRegistry.COMPLIANCE_ROLE();
-
-        await identityRegistry
-            .connect(faris)
-            .grantRole(complianceRole, wael.address);
-
-        await identityRegistry
-            .connect(wael)
-            .authorize(luay.address);
-
-        await identityRegistry
-            .connect(wael)
-            .authorize(tarik.address);
-
-        const AssetToken = await ethers.getContractFactory(
-            "AssetToken"
-        );
-
-        const assetToken = await AssetToken.deploy(
-            "Institutional Note",
-            "NOTE",
-            await identityRegistry.getAddress(),
-            faris.address,
-            luay.address,
-            faris.address
-        );
-
-        const MockCashToken = await ethers.getContractFactory(
-            "MockCashToken"
-        );
-
-        const cashToken = await MockCashToken.deploy();
-
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
-
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
-
-        await assetToken
-            .connect(luay)
-            .mint(
-                luay.address,
-                100n
-            );
-
-        await cashToken.mint(
-            tarik.address,
-            1000n
-        );
-
-        await assetToken
-            .connect(luay)
-            .approve(
-                await settlementEngine.getAddress(),
-                100n
-            );
-
-        await cashToken
-            .connect(tarik)
-            .approve(
-                await settlementEngine.getAddress(),
-                1000n
-            );
-
-        // Tarik was approved before, but compliance revokes him.
-        await identityRegistry
-            .connect(wael)
-            .revoke(tarik.address);
-
-        const settlementId =
-            ethers.id("SETTLEMENT_006");
-
-        const instruction = {
-            settlementId,
-            seller: luay.address,
-            buyer: tarik.address,
-            assetToken: await assetToken.getAddress(),
-            cashToken: await cashToken.getAddress(),
-            assetAmount: 100n,
-            cashAmount: 1000n,
-        };
-
-        await expect(
-            settlementEngine
-                .connect(settler)
-                .settle(instruction)
-        ).to.revert(ethers);
-
-        expect(
-            await assetToken.balanceOf(luay.address)
-        ).to.equal(100n);
-
-        expect(
-            await assetToken.balanceOf(tarik.address)
-        ).to.equal(0n);
-
-        expect(
-            await cashToken.balanceOf(tarik.address)
-        ).to.equal(1000n);
-
-        expect(
-            await cashToken.balanceOf(luay.address)
-        ).to.equal(0n);
-
-        expect(
-            await settlementEngine.isSettled(settlementId)
-        ).to.equal(false);
-    });
-
-    it("reverts settlement if the seller is no longer authorized", async function () {
-        const { ethers } = await network.create();
-
-        const [
-            faris,
-            wael,
-            settler,
-            luay,
-            tarik,
-        ] = await ethers.getSigners();
-
-        const IdentityRegistry = await ethers.getContractFactory(
-            "IdentityRegistry"
-        );
-
-        const identityRegistry = await IdentityRegistry.deploy(
-            faris.address
-        );
-
-        const complianceRole =
-            await identityRegistry.COMPLIANCE_ROLE();
-
-        await identityRegistry
-            .connect(faris)
-            .grantRole(complianceRole, wael.address);
-
-        await identityRegistry
-            .connect(wael)
-            .authorize(luay.address);
-
-        await identityRegistry
-            .connect(wael)
-            .authorize(tarik.address);
-
-        const AssetToken = await ethers.getContractFactory(
-            "AssetToken"
-        );
-
-        const assetToken = await AssetToken.deploy(
-            "Institutional Note",
-            "NOTE",
-            await identityRegistry.getAddress(),
-            faris.address,
-            luay.address,
-            faris.address
-        );
-
-        const MockCashToken = await ethers.getContractFactory(
-            "MockCashToken"
-        );
-
-        const cashToken = await MockCashToken.deploy();
-
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
-
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
-
-        await assetToken
-            .connect(luay)
-            .mint(
-                luay.address,
-                100n
-            );
-
-        await cashToken.mint(
-            tarik.address,
-            1000n
-        );
-
-        await assetToken
-            .connect(luay)
-            .approve(
-                await settlementEngine.getAddress(),
-                100n
-            );
-
-        await cashToken
-            .connect(tarik)
-            .approve(
-                await settlementEngine.getAddress(),
-                1000n
-            );
-
-        // Luay was approved when he received the asset,
-        // but compliance revokes him before settlement.
-        await identityRegistry
-            .connect(wael)
-            .revoke(luay.address);
-
-        const settlementId =
-            ethers.id("SETTLEMENT_007");
-
-        const instruction = {
-            settlementId,
-            seller: luay.address,
-            buyer: tarik.address,
-            assetToken: await assetToken.getAddress(),
-            cashToken: await cashToken.getAddress(),
-            assetAmount: 100n,
-            cashAmount: 1000n,
-        };
-
-        await expect(
-            settlementEngine
-                .connect(settler)
-                .settle(instruction)
-        ).to.revert(ethers);
-
-        expect(
-            await assetToken.balanceOf(luay.address)
-        ).to.equal(100n);
-
-        expect(
-            await assetToken.balanceOf(tarik.address)
-        ).to.equal(0n);
-
-        expect(
-            await cashToken.balanceOf(tarik.address)
-        ).to.equal(1000n);
-
-        expect(
-            await cashToken.balanceOf(luay.address)
-        ).to.equal(0n);
-
-        expect(
-            await settlementEngine.isSettled(settlementId)
-        ).to.equal(false);
-    });
-
-    it("reverts settlement if the asset token is paused", async function () {
-        const { ethers } = await network.create();
-
-        const [
-            faris,
-            wael,
-            settler,
-            luay,
-            tarik,
-        ] = await ethers.getSigners();
-
-        const IdentityRegistry = await ethers.getContractFactory(
-            "IdentityRegistry"
-        );
-
-        const identityRegistry = await IdentityRegistry.deploy(
-            faris.address
-        );
-
-        const complianceRole =
-            await identityRegistry.COMPLIANCE_ROLE();
-
-        await identityRegistry
-            .connect(faris)
-            .grantRole(complianceRole, wael.address);
-
-        await identityRegistry
-            .connect(wael)
-            .authorize(luay.address);
-
-        await identityRegistry
-            .connect(wael)
-            .authorize(tarik.address);
-
-        const AssetToken = await ethers.getContractFactory(
-            "AssetToken"
-        );
-
-        const assetToken = await AssetToken.deploy(
-            "Institutional Note",
-            "NOTE",
-            await identityRegistry.getAddress(),
-            faris.address,
-            luay.address,
-            faris.address
-        );
-
-        const MockCashToken = await ethers.getContractFactory(
-            "MockCashToken"
-        );
-
-        const cashToken = await MockCashToken.deploy();
-
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
-
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
-
-        await assetToken
-            .connect(luay)
-            .mint(
-                luay.address,
-                100n
-            );
-
-        await cashToken.mint(
-            tarik.address,
-            1000n
-        );
-
-        await assetToken
-            .connect(luay)
-            .approve(
-                await settlementEngine.getAddress(),
-                100n
-            );
-
-        await cashToken
-            .connect(tarik)
-            .approve(
-                await settlementEngine.getAddress(),
-                1000n
-            );
-
-        // Faris has the PAUSER_ROLE.
-        await assetToken
-            .connect(faris)
-            .pause();
-
-        const settlementId =
-            ethers.id("SETTLEMENT_008");
-
-        const instruction = {
-            settlementId,
-            seller: luay.address,
-            buyer: tarik.address,
-            assetToken: await assetToken.getAddress(),
-            cashToken: await cashToken.getAddress(),
-            assetAmount: 100n,
-            cashAmount: 1000n,
-        };
-
-        await expect(
-            settlementEngine
-                .connect(settler)
-                .settle(instruction)
-        ).to.revert(ethers);
-
-        expect(
-            await assetToken.balanceOf(luay.address)
-        ).to.equal(100n);
-
-        expect(
-            await assetToken.balanceOf(tarik.address)
-        ).to.equal(0n);
-
-        expect(
-            await cashToken.balanceOf(tarik.address)
-        ).to.equal(1000n);
-
-        expect(
-            await cashToken.balanceOf(luay.address)
-        ).to.equal(0n);
-
-        expect(
-            await settlementEngine.isSettled(settlementId)
-        ).to.equal(false);
-    });
-
-    it("prevents the same settlement from being executed twice", async function () {
-        const { ethers } = await network.create();
-
-        const [
-            faris,
-            wael,
-            settler,
-            luay,
-            tarik,
-        ] = await ethers.getSigners();
-
-        const IdentityRegistry = await ethers.getContractFactory(
-            "IdentityRegistry"
-        );
-
-        const identityRegistry = await IdentityRegistry.deploy(
-            faris.address
-        );
-
-        const complianceRole =
-            await identityRegistry.COMPLIANCE_ROLE();
-
-        await identityRegistry
-            .connect(faris)
-            .grantRole(complianceRole, wael.address);
-
-        await identityRegistry
-            .connect(wael)
-            .authorize(luay.address);
-
-        await identityRegistry
-            .connect(wael)
-            .authorize(tarik.address);
-
-        const AssetToken = await ethers.getContractFactory(
-            "AssetToken"
-        );
-
-        const assetToken = await AssetToken.deploy(
-            "Institutional Note",
-            "NOTE",
-            await identityRegistry.getAddress(),
-            faris.address,
-            luay.address,
-            faris.address
-        );
-
-        const MockCashToken = await ethers.getContractFactory(
-            "MockCashToken"
-        );
-
-        const cashToken = await MockCashToken.deploy();
-
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
-
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
-
-        await assetToken
-            .connect(luay)
-            .mint(
-                luay.address,
-                200n
-            );
-
-        await cashToken.mint(
-            tarik.address,
-            2000n
-        );
-
-        await assetToken
-            .connect(luay)
-            .approve(
-                await settlementEngine.getAddress(),
-                200n
-            );
-
-        await cashToken
-            .connect(tarik)
-            .approve(
-                await settlementEngine.getAddress(),
-                2000n
-            );
-
-        const settlementId =
-            ethers.id("SETTLEMENT_009");
-
-        const instruction = {
-            settlementId,
-            seller: luay.address,
-            buyer: tarik.address,
-            assetToken: await assetToken.getAddress(),
-            cashToken: await cashToken.getAddress(),
-            assetAmount: 100n,
-            cashAmount: 1000n,
-        };
-
-        // First execution succeeds.
-        await settlementEngine
-            .connect(settler)
-            .settle(instruction);
-
-        // Second execution with the same settlement ID must fail.
-        await expect(
-            settlementEngine
-                .connect(settler)
-                .settle(instruction)
-        ).to.be.revertedWithCustomError(
-            settlementEngine,
-            "AlreadySettled"
-        ).withArgs(settlementId);
-
-        expect(
-            await assetToken.balanceOf(luay.address)
-        ).to.equal(100n);
-
-        expect(
-            await assetToken.balanceOf(tarik.address)
-        ).to.equal(100n);
-
-        expect(
-            await cashToken.balanceOf(tarik.address)
-        ).to.equal(1000n);
-
-        expect(
-            await cashToken.balanceOf(luay.address)
-        ).to.equal(1000n);
-
-        expect(
-            await settlementEngine.isSettled(settlementId)
-        ).to.equal(true);
-    });
+                .settle(
+                    instruction,
+                    signature
+                );
+
+            /*
+             * The same valid signed instruction is replayed.
+             * Signature verification still passes, but the
+             * settlement ID has already been consumed.
+             */
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        instruction,
+                        signature
+                    )
+            )
+                .to.be.revertedWithCustomError(
+                    settlementEngine,
+                    "AlreadySettled"
+                )
+                .withArgs(settlementId);
+
+            expect(
+                await assetToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(100n);
+
+            expect(
+                await assetToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(100n);
+
+            expect(
+                await cashToken.balanceOf(
+                    tarik.address
+                )
+            ).to.equal(1000n);
+
+            expect(
+                await cashToken.balanceOf(
+                    luay.address
+                )
+            ).to.equal(1000n);
+
+            expect(
+                await settlementEngine.isSettled(
+                    settlementId
+                )
+            ).to.equal(true);
+        }
+    );
 });

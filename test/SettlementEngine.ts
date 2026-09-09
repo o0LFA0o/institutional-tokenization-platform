@@ -2,6 +2,114 @@ import { expect } from "chai";
 import { network } from "hardhat";
 
 describe("SettlementEngine", function () {
+    async function signSettlementInstruction(
+        signer: any,
+        settlementEngine: any,
+        instruction: any
+    ) {
+        const networkInfo =
+            await signer.provider.getNetwork();
+
+        const domain = {
+            name: "Institutional Tokenization Platform",
+            version: "1",
+            chainId: networkInfo.chainId,
+            verifyingContract:
+                await settlementEngine.getAddress(),
+        };
+
+        const types = {
+            SettlementInstruction: [
+                {
+                    name: "settlementId",
+                    type: "bytes32",
+                },
+                {
+                    name: "seller",
+                    type: "address",
+                },
+                {
+                    name: "buyer",
+                    type: "address",
+                },
+                {
+                    name: "assetToken",
+                    type: "address",
+                },
+                {
+                    name: "cashToken",
+                    type: "address",
+                },
+                {
+                    name: "assetAmount",
+                    type: "uint256",
+                },
+                {
+                    name: "cashAmount",
+                    type: "uint256",
+                },
+            ],
+        };
+
+        return signer.signTypedData(
+            domain,
+            types,
+            instruction
+        );
+    }
+
+    async function deploySettlementEngine() {
+        const { ethers } = await network.create();
+
+        const [
+            faris,
+            settler,
+            seller,
+            buyer,
+            other,
+            assetToken,
+            cashToken,
+        ] = await ethers.getSigners();
+
+        const SettlementEngine =
+            await ethers.getContractFactory(
+                "SettlementEngine"
+            );
+
+        const settlementEngine =
+            await SettlementEngine.deploy(
+                faris.address,
+                settler.address
+            );
+
+        const settlementId =
+            ethers.id("SETTLEMENT_001");
+
+        const instruction = {
+            settlementId,
+            seller: seller.address,
+            buyer: buyer.address,
+            assetToken: assetToken.address,
+            cashToken: cashToken.address,
+            assetAmount: 100n,
+            cashAmount: 1000n,
+        };
+
+        return {
+            ethers,
+            faris,
+            settler,
+            seller,
+            buyer,
+            other,
+            assetToken,
+            cashToken,
+            settlementEngine,
+            settlementId,
+            instruction,
+        };
+    }
+
     async function deployFundedSettlement() {
         const { ethers } = await network.create();
 
@@ -12,21 +120,27 @@ describe("SettlementEngine", function () {
             buyer,
         ] = await ethers.getSigners();
 
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
+        const SettlementEngine =
+            await ethers.getContractFactory(
+                "SettlementEngine"
+            );
 
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
+        const settlementEngine =
+            await SettlementEngine.deploy(
+                faris.address,
+                settler.address
+            );
 
-        const MockCashToken = await ethers.getContractFactory(
-            "MockCashToken"
-        );
+        const MockCashToken =
+            await ethers.getContractFactory(
+                "MockCashToken"
+            );
 
-        const assetToken = await MockCashToken.deploy();
-        const cashToken = await MockCashToken.deploy();
+        const assetToken =
+            await MockCashToken.deploy();
+
+        const cashToken =
+            await MockCashToken.deploy();
 
         await assetToken.mint(
             seller.address,
@@ -59,8 +173,10 @@ describe("SettlementEngine", function () {
             settlementId,
             seller: seller.address,
             buyer: buyer.address,
-            assetToken: await assetToken.getAddress(),
-            cashToken: await cashToken.getAddress(),
+            assetToken:
+                await assetToken.getAddress(),
+            cashToken:
+                await cashToken.getAddress(),
             assetAmount: 100n,
             cashAmount: 1000n,
         };
@@ -79,444 +195,421 @@ describe("SettlementEngine", function () {
         };
     }
 
-    it("starts with a settlement as unsettled", async function () {
-        const { ethers } = await network.create();
-
-        const [faris, settler] = await ethers.getSigners();
-
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
-
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
-
-        const settlementId = ethers.id("SETTLEMENT_001");
-
-        expect(
-            await settlementEngine.isSettled(settlementId)
-        ).to.equal(false);
-    });
-
-    it("marks a settlement as settled", async function () {
-        const {
-            settler,
-            settlementEngine,
-            settlementId,
-            instruction,
-        } = await deployFundedSettlement();
-
-        await settlementEngine
-            .connect(settler)
-            .settle(instruction);
-
-        expect(
-            await settlementEngine.isSettled(settlementId)
-        ).to.equal(true);
-    });
-
-    it("prevents the same settlement from being settled twice", async function () {
-        const {
-            settler,
-            settlementEngine,
-            settlementId,
-            instruction,
-        } = await deployFundedSettlement();
-
-        await settlementEngine
-            .connect(settler)
-            .settle(instruction);
-
-        await expect(
-            settlementEngine
-                .connect(settler)
-                .settle(instruction)
-        )
-            .to.be.revertedWithCustomError(
+    it(
+        "starts with a settlement as unsettled",
+        async function () {
+            const {
                 settlementEngine,
-                "AlreadySettled"
-            )
-            .withArgs(settlementId);
-    });
-
-    it("emits a settlement completion event", async function () {
-        const {
-            settler,
-            settlementEngine,
-            settlementId,
-            instruction,
-        } = await deployFundedSettlement();
-
-        await expect(
-            settlementEngine
-                .connect(settler)
-                .settle(instruction)
-        )
-            .to.emit(
-                settlementEngine,
-                "SettlementCompleted"
-            )
-            .withArgs(
                 settlementId,
-                settler.address
+            } = await deploySettlementEngine();
+
+            expect(
+                await settlementEngine.isSettled(
+                    settlementId
+                )
+            ).to.equal(false);
+        }
+    );
+
+    it(
+        "marks a settlement as settled",
+        async function () {
+            const {
+                settler,
+                seller,
+                settlementEngine,
+                settlementId,
+                instruction,
+            } = await deployFundedSettlement();
+
+            const signature =
+                await signSettlementInstruction(
+                    seller,
+                    settlementEngine,
+                    instruction
+                );
+
+            await settlementEngine
+                .connect(settler)
+                .settle(
+                    instruction,
+                    signature
+                );
+
+            expect(
+                await settlementEngine.isSettled(
+                    settlementId
+                )
+            ).to.equal(true);
+        }
+    );
+
+    it(
+        "prevents the same settlement from being settled twice",
+        async function () {
+            const {
+                settler,
+                seller,
+                settlementEngine,
+                settlementId,
+                instruction,
+            } = await deployFundedSettlement();
+
+            const signature =
+                await signSettlementInstruction(
+                    seller,
+                    settlementEngine,
+                    instruction
+                );
+
+            await settlementEngine
+                .connect(settler)
+                .settle(
+                    instruction,
+                    signature
+                );
+
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        instruction,
+                        signature
+                    )
+            )
+                .to.be.revertedWithCustomError(
+                    settlementEngine,
+                    "AlreadySettled"
+                )
+                .withArgs(settlementId);
+        }
+    );
+
+    it(
+        "emits a settlement completion event",
+        async function () {
+            const {
+                settler,
+                seller,
+                settlementEngine,
+                settlementId,
+                instruction,
+            } = await deployFundedSettlement();
+
+            const signature =
+                await signSettlementInstruction(
+                    seller,
+                    settlementEngine,
+                    instruction
+                );
+
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        instruction,
+                        signature
+                    )
+            )
+                .to.emit(
+                    settlementEngine,
+                    "SettlementCompleted"
+                )
+                .withArgs(
+                    settlementId,
+                    settler.address
+                );
+        }
+    );
+
+    it(
+        "rejects a zero settlement ID",
+        async function () {
+            const {
+                ethers,
+                settler,
+                settlementEngine,
+                instruction,
+            } = await deploySettlementEngine();
+
+            const invalidInstruction = {
+                ...instruction,
+                settlementId: ethers.ZeroHash,
+            };
+
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        invalidInstruction,
+                        "0x"
+                    )
+            ).to.be.revertedWithCustomError(
+                settlementEngine,
+                "InvalidSettlementId"
             );
-    });
+        }
+    );
 
-    it("rejects a zero settlement ID", async function () {
-        const { ethers } = await network.create();
+    it(
+        "rejects a zero seller address",
+        async function () {
+            const {
+                ethers,
+                settler,
+                settlementEngine,
+                instruction,
+            } = await deploySettlementEngine();
 
-        const [
-            faris,
-            settler,
-            luay,
-            tarik,
-        ] = await ethers.getSigners();
+            const invalidInstruction = {
+                ...instruction,
+                seller: ethers.ZeroAddress,
+            };
 
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        invalidInstruction,
+                        "0x"
+                    )
+            ).to.be.revertedWithCustomError(
+                settlementEngine,
+                "InvalidSeller"
+            );
+        }
+    );
 
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
+    it(
+        "rejects a zero buyer address",
+        async function () {
+            const {
+                ethers,
+                settler,
+                settlementEngine,
+                instruction,
+            } = await deploySettlementEngine();
 
-        const instruction = {
-            settlementId: ethers.ZeroHash,
-            seller: luay.address,
-            buyer: tarik.address,
-            assetToken: ethers.ZeroAddress,
-            cashToken: ethers.ZeroAddress,
-            assetAmount: 0n,
-            cashAmount: 0n,
-        };
+            const invalidInstruction = {
+                ...instruction,
+                buyer: ethers.ZeroAddress,
+            };
 
-        await expect(
-            settlementEngine
-                .connect(settler)
-                .settle(instruction)
-        ).to.be.revertedWithCustomError(
-            settlementEngine,
-            "InvalidSettlementId"
-        );
-    });
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        invalidInstruction,
+                        "0x"
+                    )
+            ).to.be.revertedWithCustomError(
+                settlementEngine,
+                "InvalidBuyer"
+            );
+        }
+    );
 
-    it("rejects a zero seller address", async function () {
-        const { ethers } = await network.create();
+    it(
+        "rejects a zero asset token address",
+        async function () {
+            const {
+                ethers,
+                settler,
+                settlementEngine,
+                instruction,
+            } = await deploySettlementEngine();
 
-        const [
-            faris,
-            settler,
-            ,
-            tarik,
-        ] = await ethers.getSigners();
+            const invalidInstruction = {
+                ...instruction,
+                assetToken: ethers.ZeroAddress,
+            };
 
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        invalidInstruction,
+                        "0x"
+                    )
+            ).to.be.revertedWithCustomError(
+                settlementEngine,
+                "InvalidAssetToken"
+            );
+        }
+    );
 
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
+    it(
+        "rejects a zero cash token address",
+        async function () {
+            const {
+                ethers,
+                settler,
+                settlementEngine,
+                instruction,
+            } = await deploySettlementEngine();
 
-        const instruction = {
-            settlementId: ethers.id("SETTLEMENT_001"),
-            seller: ethers.ZeroAddress,
-            buyer: tarik.address,
-            assetToken: ethers.ZeroAddress,
-            cashToken: ethers.ZeroAddress,
-            assetAmount: 0n,
-            cashAmount: 0n,
-        };
+            const invalidInstruction = {
+                ...instruction,
+                cashToken: ethers.ZeroAddress,
+            };
 
-        await expect(
-            settlementEngine
-                .connect(settler)
-                .settle(instruction)
-        ).to.be.revertedWithCustomError(
-            settlementEngine,
-            "InvalidSeller"
-        );
-    });
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        invalidInstruction,
+                        "0x"
+                    )
+            ).to.be.revertedWithCustomError(
+                settlementEngine,
+                "InvalidCashToken"
+            );
+        }
+    );
 
-    it("rejects a zero buyer address", async function () {
-        const { ethers } = await network.create();
+    it(
+        "rejects a zero asset amount",
+        async function () {
+            const {
+                settler,
+                settlementEngine,
+                instruction,
+            } = await deploySettlementEngine();
 
-        const [
-            faris,
-            settler,
-            luay,
-        ] = await ethers.getSigners();
+            const invalidInstruction = {
+                ...instruction,
+                assetAmount: 0n,
+            };
 
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        invalidInstruction,
+                        "0x"
+                    )
+            ).to.be.revertedWithCustomError(
+                settlementEngine,
+                "InvalidAssetAmount"
+            );
+        }
+    );
 
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
+    it(
+        "rejects a zero cash amount",
+        async function () {
+            const {
+                settler,
+                settlementEngine,
+                instruction,
+            } = await deploySettlementEngine();
 
-        const instruction = {
-            settlementId: ethers.id("SETTLEMENT_001"),
-            seller: luay.address,
-            buyer: ethers.ZeroAddress,
-            assetToken: ethers.ZeroAddress,
-            cashToken: ethers.ZeroAddress,
-            assetAmount: 0n,
-            cashAmount: 0n,
-        };
+            const invalidInstruction = {
+                ...instruction,
+                cashAmount: 0n,
+            };
 
-        await expect(
-            settlementEngine
-                .connect(settler)
-                .settle(instruction)
-        ).to.be.revertedWithCustomError(
-            settlementEngine,
-            "InvalidBuyer"
-        );
-    });
+            await expect(
+                settlementEngine
+                    .connect(settler)
+                    .settle(
+                        invalidInstruction,
+                        "0x"
+                    )
+            ).to.be.revertedWithCustomError(
+                settlementEngine,
+                "InvalidCashAmount"
+            );
+        }
+    );
 
-    it("rejects a zero asset token address", async function () {
-        const { ethers } = await network.create();
+    it(
+        "rejects settlement from an unauthorized caller",
+        async function () {
+            const {
+                ethers,
+                seller,
+                other,
+                settlementEngine,
+                instruction,
+            } = await deploySettlementEngine();
 
-        const [
-            faris,
-            settler,
-            luay,
-            tarik,
-        ] = await ethers.getSigners();
+            const signature =
+                await signSettlementInstruction(
+                    seller,
+                    settlementEngine,
+                    instruction
+                );
 
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
+            await expect(
+                settlementEngine
+                    .connect(other)
+                    .settle(
+                        instruction,
+                        signature
+                    )
+            ).to.be.revertedWithCustomError(
+                settlementEngine,
+                "AccessControlUnauthorizedAccount"
+            ).withArgs(
+                other.address,
+                await settlementEngine.SETTLER_ROLE()
+            );
+        }
+    );
 
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
+    it(
+        "rejects a zero admin address",
+        async function () {
+            const { ethers } =
+                await network.create();
 
-        const instruction = {
-            settlementId: ethers.id("SETTLEMENT_001"),
-            seller: luay.address,
-            buyer: tarik.address,
-            assetToken: ethers.ZeroAddress,
-            cashToken: ethers.ZeroAddress,
-            assetAmount: 0n,
-            cashAmount: 0n,
-        };
+            const [
+                faris,
+                settler,
+            ] = await ethers.getSigners();
 
-        await expect(
-            settlementEngine
-                .connect(settler)
-                .settle(instruction)
-        ).to.be.revertedWithCustomError(
-            settlementEngine,
-            "InvalidAssetToken"
-        );
-    });
+            const SettlementEngine =
+                await ethers.getContractFactory(
+                    "SettlementEngine"
+                );
 
-    it("rejects a zero cash token address", async function () {
-        const { ethers } = await network.create();
+            await expect(
+                SettlementEngine.deploy(
+                    ethers.ZeroAddress,
+                    settler.address
+                )
+            ).to.be.revertedWithCustomError(
+                SettlementEngine,
+                "InvalidAdmin"
+            );
+        }
+    );
 
-        const [
-            faris,
-            settler,
-            luay,
-            tarik,
-            assetTokenPlaceholder,
-        ] = await ethers.getSigners();
+    it(
+        "rejects a zero settler address",
+        async function () {
+            const { ethers } =
+                await network.create();
 
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
+            const [
+                faris,
+            ] = await ethers.getSigners();
 
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
+            const SettlementEngine =
+                await ethers.getContractFactory(
+                    "SettlementEngine"
+                );
 
-        const instruction = {
-            settlementId: ethers.id("SETTLEMENT_001"),
-            seller: luay.address,
-            buyer: tarik.address,
-            assetToken: assetTokenPlaceholder.address,
-            cashToken: ethers.ZeroAddress,
-            assetAmount: 0n,
-            cashAmount: 0n,
-        };
-
-        await expect(
-            settlementEngine
-                .connect(settler)
-                .settle(instruction)
-        ).to.be.revertedWithCustomError(
-            settlementEngine,
-            "InvalidCashToken"
-        );
-    });
-
-    it("rejects a zero asset amount", async function () {
-        const { ethers } = await network.create();
-
-        const [
-            faris,
-            settler,
-            luay,
-            tarik,
-            assetTokenPlaceholder,
-            cashTokenPlaceholder,
-        ] = await ethers.getSigners();
-
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
-
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
-
-        const instruction = {
-            settlementId: ethers.id("SETTLEMENT_001"),
-            seller: luay.address,
-            buyer: tarik.address,
-            assetToken: assetTokenPlaceholder.address,
-            cashToken: cashTokenPlaceholder.address,
-            assetAmount: 0n,
-            cashAmount: 0n,
-        };
-
-        await expect(
-            settlementEngine
-                .connect(settler)
-                .settle(instruction)
-        ).to.be.revertedWithCustomError(
-            settlementEngine,
-            "InvalidAssetAmount"
-        );
-    });
-
-    it("rejects a zero cash amount", async function () {
-        const { ethers } = await network.create();
-
-        const [
-            faris,
-            settler,
-            luay,
-            tarik,
-            assetTokenPlaceholder,
-            cashTokenPlaceholder,
-        ] = await ethers.getSigners();
-
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
-
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
-
-        const instruction = {
-            settlementId: ethers.id("SETTLEMENT_001"),
-            seller: luay.address,
-            buyer: tarik.address,
-            assetToken: assetTokenPlaceholder.address,
-            cashToken: cashTokenPlaceholder.address,
-            assetAmount: 100n,
-            cashAmount: 0n,
-        };
-
-        await expect(
-            settlementEngine
-                .connect(settler)
-                .settle(instruction)
-        ).to.be.revertedWithCustomError(
-            settlementEngine,
-            "InvalidCashAmount"
-        );
-    });
-
-    it("rejects settlement from an unauthorized caller", async function () {
-        const { ethers } = await network.create();
-
-        const [
-            faris,
-            settler,
-            unauthorizedCaller,
-            luay,
-            tarik,
-            assetTokenPlaceholder,
-            cashTokenPlaceholder,
-        ] = await ethers.getSigners();
-
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
-
-        const settlementEngine = await SettlementEngine.deploy(
-            faris.address,
-            settler.address
-        );
-
-        const instruction = {
-            settlementId: ethers.id("SETTLEMENT_001"),
-            seller: luay.address,
-            buyer: tarik.address,
-            assetToken: assetTokenPlaceholder.address,
-            cashToken: cashTokenPlaceholder.address,
-            assetAmount: 100n,
-            cashAmount: 1000n,
-        };
-
-        await expect(
-            settlementEngine
-                .connect(unauthorizedCaller)
-                .settle(instruction)
-        ).to.revert(ethers);
-    });
-
-    it("rejects a zero admin address", async function () {
-        const { ethers } = await network.create();
-
-        const [, settler] = await ethers.getSigners();
-
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
-
-        await expect(
-            SettlementEngine.deploy(
-                ethers.ZeroAddress,
-                settler.address
-            )
-        ).to.be.revertedWithCustomError(
-            SettlementEngine,
-            "InvalidAdmin"
-        );
-    });
-
-    it("rejects a zero settler address", async function () {
-        const { ethers } = await network.create();
-
-        const [faris] = await ethers.getSigners();
-
-        const SettlementEngine = await ethers.getContractFactory(
-            "SettlementEngine"
-        );
-
-        await expect(
-            SettlementEngine.deploy(
-                faris.address,
-                ethers.ZeroAddress
-            )
-        ).to.be.revertedWithCustomError(
-            SettlementEngine,
-            "InvalidSettler"
-        );
-    });
+            await expect(
+                SettlementEngine.deploy(
+                    faris.address,
+                    ethers.ZeroAddress
+                )
+            ).to.be.revertedWithCustomError(
+                SettlementEngine,
+                "InvalidSettler"
+            );
+        }
+    );
 });
