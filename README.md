@@ -405,7 +405,7 @@ Settlement ID
 
 ## Testing
 
-The project currently contains **64 passing tests** covering unit and integration behavior.
+The project currently contains **68 passing tests** covering unit and integration behavior.
 
 ```bash
 npx hardhat test
@@ -576,6 +576,6 @@ Current development milestone:
 - EIP-712 seller authorization implemented
 - Settlement replay protection implemented
 - Atomic DvP integration tests implemented
-- 64 tests passing
+- 68 tests passing
 
 Further development will remain focused on institutional digital-asset infrastructure and explicit security properties rather than expanding into unrelated Web3 functionality.
