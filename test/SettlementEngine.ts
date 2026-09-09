@@ -612,4 +612,209 @@ describe("SettlementEngine", function () {
             );
         }
     );
+
+    it("rejects a settlement signed by someone other than the seller", async function () {
+        const { ethers } = await network.create();
+
+        const [admin, settler, luay, tarik, ahmed] =
+            await ethers.getSigners();
+
+        const SettlementEngine =
+            await ethers.getContractFactory("SettlementEngine");
+
+        const settlementEngine =
+            await SettlementEngine.deploy(
+                admin.address,
+                settler.address
+            );
+
+        const instruction = {
+            settlementId: ethers.id("wrong-signer-test"),
+            seller: luay.address,
+            buyer: tarik.address,
+            assetToken: ethers.Wallet.createRandom().address,
+            cashToken: ethers.Wallet.createRandom().address,
+            assetAmount: ethers.parseEther("100"),
+            cashAmount: ethers.parseEther("1000"),
+        };
+
+        const signature =
+            await signSettlementInstruction(
+                ahmed,
+                settlementEngine,
+                instruction
+            );
+
+        await expect(
+            settlementEngine
+                .connect(settler)
+                .settle(instruction, signature)
+        ).to.be.revertedWithCustomError(
+            settlementEngine,
+            "InvalidSignature"
+        );
+    });
+
+    it("rejects settlement terms modified after the seller signs", async function () {
+        const { ethers } = await network.create();
+
+        const [admin, settler, luay, tarik] =
+            await ethers.getSigners();
+
+        const SettlementEngine =
+            await ethers.getContractFactory("SettlementEngine");
+
+        const settlementEngine =
+            await SettlementEngine.deploy(
+                admin.address,
+                settler.address
+            );
+
+        const signedInstruction = {
+            settlementId: ethers.id("tampered-instruction-test"),
+            seller: luay.address,
+            buyer: tarik.address,
+            assetToken: ethers.Wallet.createRandom().address,
+            cashToken: ethers.Wallet.createRandom().address,
+            assetAmount: ethers.parseEther("100"),
+            cashAmount: ethers.parseEther("1000"),
+        };
+
+        const signature =
+            await signSettlementInstruction(
+                luay,
+                settlementEngine,
+                signedInstruction
+            );
+
+        const tamperedInstruction = {
+            ...signedInstruction,
+            cashAmount: ethers.parseEther("10000"),
+        };
+
+        await expect(
+            settlementEngine
+                .connect(settler)
+                .settle(tamperedInstruction, signature)
+        ).to.be.revertedWithCustomError(
+            settlementEngine,
+            "InvalidSignature"
+        );
+    });
+
+    it("rejects a signature created for a different SettlementEngine", async function () {
+        const { ethers } = await network.create();
+
+        const [admin, settler, luay, tarik] =
+            await ethers.getSigners();
+
+        const SettlementEngine =
+            await ethers.getContractFactory("SettlementEngine");
+
+        const settlementEngineA =
+            await SettlementEngine.deploy(
+                admin.address,
+                settler.address
+            );
+
+        const settlementEngineB =
+            await SettlementEngine.deploy(
+                admin.address,
+                settler.address
+            );
+
+        const instruction = {
+            settlementId: ethers.id("different-engine-test"),
+            seller: luay.address,
+            buyer: tarik.address,
+            assetToken: ethers.Wallet.createRandom().address,
+            cashToken: ethers.Wallet.createRandom().address,
+            assetAmount: ethers.parseEther("100"),
+            cashAmount: ethers.parseEther("1000"),
+        };
+
+        const signature =
+            await signSettlementInstruction(
+                luay,
+                settlementEngineA,
+                instruction
+            );
+
+        await expect(
+            settlementEngineB
+                .connect(settler)
+                .settle(instruction, signature)
+        ).to.be.revertedWithCustomError(
+            settlementEngineB,
+            "InvalidSignature"
+        );
+    });
+
+    it("rejects a signature created for a different chain ID", async function () {
+        const { ethers } = await network.create();
+
+        const [admin, settler, luay, tarik] =
+            await ethers.getSigners();
+
+        const SettlementEngine =
+            await ethers.getContractFactory("SettlementEngine");
+
+        const settlementEngine =
+            await SettlementEngine.deploy(
+                admin.address,
+                settler.address
+            );
+
+        const instruction = {
+            settlementId: ethers.id("different-chain-test"),
+            seller: luay.address,
+            buyer: tarik.address,
+            assetToken: ethers.Wallet.createRandom().address,
+            cashToken: ethers.Wallet.createRandom().address,
+            assetAmount: ethers.parseEther("100"),
+            cashAmount: ethers.parseEther("1000"),
+        };
+
+        const networkInfo =
+            await luay.provider.getNetwork();
+
+        const wrongChainId =
+            networkInfo.chainId + 1n;
+
+        const domain = {
+            name: "Institutional Tokenization Platform",
+            version: "1",
+            chainId: wrongChainId,
+            verifyingContract:
+                await settlementEngine.getAddress(),
+        };
+
+        const types = {
+            SettlementInstruction: [
+                { name: "settlementId", type: "bytes32" },
+                { name: "seller", type: "address" },
+                { name: "buyer", type: "address" },
+                { name: "assetToken", type: "address" },
+                { name: "cashToken", type: "address" },
+                { name: "assetAmount", type: "uint256" },
+                { name: "cashAmount", type: "uint256" },
+            ],
+        };
+
+        const signature =
+            await luay.signTypedData(
+                domain,
+                types,
+                instruction
+            );
+
+        await expect(
+            settlementEngine
+                .connect(settler)
+                .settle(instruction, signature)
+        ).to.be.revertedWithCustomError(
+            settlementEngine,
+            "InvalidSignature"
+        );
+    });
 });
