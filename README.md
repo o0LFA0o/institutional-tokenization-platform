@@ -560,6 +560,50 @@ docs/
 
 ---
 
+## End-to-End Demo
+
+The repository includes a reproducible institutional tokenization demo that walks through the full transaction lifecycle:
+
+1. Deploy the identity registry, tokenized asset, cash token, and settlement engine
+2. Grant the compliance role
+3. Authorize the issuer and investor
+4. Issue tokenized notes to the seller
+5. Fund the investor with cash tokens
+6. Approve the settlement engine to move both assets
+7. Create an EIP-712 settlement instruction
+8. Sign the instruction with the seller's wallet
+9. Execute atomic delivery-versus-payment through an authorized settlement operator
+10. Verify the final balances and settlement state
+
+Run the demo:
+
+```bash
+npx hardhat run scripts/demo.ts
+'''
+
+Example state transition:
+
+```text
+BEFORE SETTLEMENT
+Luay NOTE: 100.0
+Luay CASH: 0.0
+Tarik NOTE: 0.0
+Tarik CASH: 1000.0
+
+AFTER SETTLEMENT
+Luay NOTE: 0.0
+Luay CASH: 1000.0
+Tarik NOTE: 100.0
+Tarik CASH: 0.0
+
+Settlement executed: true
+```
+
+This demonstrates atomic delivery-versus-payment: either both the asset and cash legs complete in the same transaction, or the entire settlement reverts.
+
+
+---
+
 ## Status
 
 Current development milestone:
