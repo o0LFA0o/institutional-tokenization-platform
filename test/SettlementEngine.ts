@@ -817,4 +817,87 @@ describe("SettlementEngine", function () {
             "InvalidSignature"
         );
     });
+
+    it("prevents settlement after SETTLER_ROLE is revoked", async function () {
+        const { ethers } = await network.create();
+
+        const [admin, settler, luay, tarik] =
+            await ethers.getSigners();
+
+        const SettlementEngine =
+            await ethers.getContractFactory("SettlementEngine");
+
+        const settlementEngine =
+            await SettlementEngine.deploy(
+                admin.address,
+                settler.address
+            );
+
+        const instruction = {
+            settlementId: ethers.id("revoked-settler-test"),
+            seller: luay.address,
+            buyer: tarik.address,
+            assetToken: ethers.Wallet.createRandom().address,
+            cashToken: ethers.Wallet.createRandom().address,
+            assetAmount: ethers.parseEther("100"),
+            cashAmount: ethers.parseEther("1000"),
+        };
+
+        const signature =
+            await signSettlementInstruction(
+                luay,
+                settlementEngine,
+                instruction
+            );
+
+        const settlerRole =
+            await settlementEngine.SETTLER_ROLE();
+
+        await settlementEngine
+            .connect(admin)
+            .revokeRole(
+                settlerRole,
+                settler.address
+            );
+
+        await expect(
+            settlementEngine
+                .connect(settler)
+                .settle(instruction, signature)
+        ).to.revert(ethers);
+    });
+
+    it("rejects a malformed seller signature", async function () {
+        const { ethers } = await network.create();
+
+        const [admin, settler, luay, tarik] =
+            await ethers.getSigners();
+
+        const SettlementEngine =
+            await ethers.getContractFactory("SettlementEngine");
+
+        const settlementEngine =
+            await SettlementEngine.deploy(
+                admin.address,
+                settler.address
+            );
+
+        const instruction = {
+            settlementId: ethers.id("malformed-signature-test"),
+            seller: luay.address,
+            buyer: tarik.address,
+            assetToken: ethers.Wallet.createRandom().address,
+            cashToken: ethers.Wallet.createRandom().address,
+            assetAmount: ethers.parseEther("100"),
+            cashAmount: ethers.parseEther("1000"),
+        };
+
+        const malformedSignature = "0x1234";
+
+        await expect(
+            settlementEngine
+                .connect(settler)
+                .settle(instruction, malformedSignature)
+        ).to.revert(ethers);
+    });
 });
