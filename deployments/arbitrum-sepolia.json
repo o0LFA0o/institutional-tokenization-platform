@@ -7,5 +7,22 @@
     "AssetToken": "0x8E27fb322ab06B890657B640B59b7870Db813c59",
     "MockCashToken": "0xe504Fd4568aDC3AcCd147d0b7848743F85Ae920f",
     "SettlementEngine": "0x435D03aC40aDC9c502d2Bed8B3B3F15862ECA9F6"
+  },
+  "demo": {
+    "seller": "0xc2be95D904303f169013A846Dc41731a06aa66Db",
+    "buyer": "0x97d29F995b918518Dcc2481F873C2DC432E4b0Dc",
+    "assetAmount": "100 TIN",
+    "cashAmount": "1000 MCASH",
+    "settlementTransaction": "0xe361914bcfaa9223c5723c5321989e8fd07e7a059baf62b6d0e80d87f3825eb7"
+  }
+}{
+  "network": "Arbitrum Sepolia",
+  "chainId": 421614,
+  "deployer": "0xc2be95D904303f169013A846Dc41731a06aa66Db",
+  "contracts": {
+    "IdentityRegistry": "0x1B6e4b00F58269dFb8a8954B2a1Fd17bfE3593E7",
+    "AssetToken": "0x8E27fb322ab06B890657B640B59b7870Db813c59",
+    "MockCashToken": "0xe504Fd4568aDC3AcCd147d0b7848743F85Ae920f",
+    "SettlementEngine": "0x435D03aC40aDC9c502d2Bed8B3B3F15862ECA9F6"
   }
 }
