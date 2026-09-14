@@ -1,6 +1,7 @@
 import { WalletButton } from "@/components/WalletButton";
 import { WalletAccessPanel } from "@/components/WalletAccessPanel";
 import { AuthorizeParticipant } from "@/components/AuthorizeParticipant";
+import { IssueAsset } from "@/components/IssueAsset";
 
 import {
   addresses,
@@ -75,6 +76,8 @@ export default async function Home() {
         <WalletAccessPanel />
 
         <AuthorizeParticipant />
+
+        <IssueAsset />
 
         <section className="mt-10 grid gap-6 lg:grid-cols-[1.3fr_.7fr]">
           <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8">
@@ -212,34 +215,34 @@ export default async function Home() {
   );
 }
 
-function Metric({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div>
-      <p className="text-xs text-zinc-500">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{value}</p>
-    </div>
-  );
-}
+  function Metric({
+    label,
+    value,
+  }: {
+    label: string;
+    value: string;
+  }) {
+    return (
+      <div>
+        <p className="text-xs text-zinc-500">{label}</p>
+        <p className="mt-1 text-lg font-semibold">{value}</p>
+      </div>
+    );
+  }
 
-function Participant({
-  title,
-  address,
-  authorized,
-  asset,
-  cash,
-}: {
-  title: string;
-  address: string;
-  authorized: boolean;
-  asset: string;
-  cash: string;
-}) {
+  function Participant({
+    title,
+    address,
+    authorized,
+    asset,
+    cash,
+  }: {
+    title: string;
+    address: string;
+    authorized: boolean;
+    asset: string;
+    cash: string;
+  }) {
   return (
     <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8">
       <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
