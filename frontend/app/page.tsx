@@ -3,6 +3,7 @@ import { WalletAccessPanel } from "@/components/WalletAccessPanel";
 import { AuthorizeParticipant } from "@/components/AuthorizeParticipant";
 import { IssueAsset } from "@/components/IssueAsset";
 import { FundDemoCash } from "@/components/FundDemoCash";
+import { ApproveAssetSettlement } from "@/components/ApproveAssetSettlement";
 
 import {
   addresses,
@@ -81,6 +82,8 @@ export default async function Home() {
         <IssueAsset />
 
         <FundDemoCash />
+
+        <ApproveAssetSettlement />
 
         <section className="mt-10 grid gap-6 lg:grid-cols-[1.3fr_.7fr]">
           <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8">
