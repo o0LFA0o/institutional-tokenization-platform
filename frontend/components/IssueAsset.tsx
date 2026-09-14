@@ -43,9 +43,7 @@ const assetTokenAbi = [
     type: "function",
     name: "balanceOf",
     stateMutability: "view",
-    inputs: [
-      { name: "account", type: "address" },
-    ],
+    inputs: [{ name: "account", type: "address" }],
     outputs: [{ name: "", type: "uint256" }],
   },
 ] as const;
@@ -55,9 +53,7 @@ const identityRegistryAbi = [
     type: "function",
     name: "isAuthorized",
     stateMutability: "view",
-    inputs: [
-      { name: "account", type: "address" },
-    ],
+    inputs: [{ name: "account", type: "address" }],
     outputs: [{ name: "", type: "bool" }],
   },
 ] as const;
@@ -67,31 +63,22 @@ const ISSUER_ROLE = keccak256(
 );
 
 export function IssueAsset() {
-  const {
-    address,
-    chainId,
-    isConnected,
-  } = useAccount();
+  const { address, chainId, isConnected } = useAccount();
 
   const publicClient = usePublicClient({
     chainId: arbitrumSepolia.id,
   });
 
-  const [recipient, setRecipient] =
-    useState("");
-
-  const [amount, setAmount] =
-    useState("100");
-
+  const [recipient, setRecipient] = useState("");
+  const [amount, setAmount] = useState("100");
   const [target, setTarget] =
     useState<`0x${string}` | undefined>();
 
-  const [status, setStatus] =
-    useState("");
+  const [status, setStatus] = useState("");
+  const [isConfirming, setIsConfirming] =
+    useState(false);
 
-  const {
-    data: hasIssuerRole,
-  } = useReadContract({
+  const { data: hasIssuerRole } = useReadContract({
     address: addresses.assetToken,
     abi: assetTokenAbi,
     functionName: "hasRole",
@@ -114,9 +101,7 @@ export function IssueAsset() {
     address: addresses.identityRegistry,
     abi: identityRegistryAbi,
     functionName: "isAuthorized",
-    args: target
-      ? [target]
-      : undefined,
+    args: target ? [target] : undefined,
     chainId: arbitrumSepolia.id,
     query: {
       enabled: Boolean(target),
@@ -130,9 +115,7 @@ export function IssueAsset() {
     address: addresses.assetToken,
     abi: assetTokenAbi,
     functionName: "balanceOf",
-    args: target
-      ? [target]
-      : undefined,
+    args: target ? [target] : undefined,
     chainId: arbitrumSepolia.id,
     query: {
       enabled: Boolean(target),
@@ -155,27 +138,22 @@ export function IssueAsset() {
     return null;
   }
 
-  const validAddress =
-    isAddress(recipient);
-
-  const validAmount =
-    Number(amount) > 0;
+  const validAddress = isAddress(recipient);
+  const validAmount = Number(amount) > 0;
+  const busy = isPending || isConfirming;
 
   function inspectRecipient() {
-    if (!isAddress(recipient)) {
-      return;
+    if (isAddress(recipient)) {
+      setTarget(recipient as `0x${string}`);
     }
-
-    setTarget(
-      recipient as `0x${string}`
-    );
   }
 
   async function handleMint() {
     if (
       !isAddress(recipient) ||
       !validAmount ||
-      !publicClient
+      !publicClient ||
+      busy
     ) {
       return;
     }
@@ -201,54 +179,57 @@ export function IssueAsset() {
       return;
     }
 
-    const tokenAmount =
-      parseEther(amount);
+    try {
+      const fees =
+        await publicClient.estimateFeesPerGas();
 
-    setStatus(
-      "Preparing issuance transaction..."
-    );
+      const maxFeePerGas =
+        fees.maxFeePerGas +
+        fees.maxFeePerGas / 4n;
 
-    const fees =
-      await publicClient.estimateFeesPerGas();
+      const maxPriorityFeePerGas =
+        fees.maxPriorityFeePerGas
+          ? fees.maxPriorityFeePerGas +
+            fees.maxPriorityFeePerGas / 4n
+          : undefined;
 
-    const maxFeePerGas =
-      fees.maxFeePerGas +
-      fees.maxFeePerGas / 4n;
+      setStatus(
+        "Confirm issuance in your wallet..."
+      );
 
-    const maxPriorityFeePerGas =
-      fees.maxPriorityFeePerGas
-        ? fees.maxPriorityFeePerGas +
-          fees.maxPriorityFeePerGas / 4n
-        : undefined;
+      const hash =
+        await writeContractAsync({
+          address: addresses.assetToken,
+          abi: assetTokenAbi,
+          functionName: "mint",
+          args: [
+            account,
+            parseEther(amount),
+          ],
+          chainId: arbitrumSepolia.id,
+          maxFeePerGas,
+          maxPriorityFeePerGas,
+        });
 
-    const hash =
-      await writeContractAsync({
-        address: addresses.assetToken,
-        abi: assetTokenAbi,
-        functionName: "mint",
-        args: [
-          account,
-          tokenAmount,
-        ],
-        chainId: arbitrumSepolia.id,
-        maxFeePerGas,
-        maxPriorityFeePerGas,
+      setIsConfirming(true);
+
+      setStatus(
+        "Transaction submitted. Waiting for confirmation..."
+      );
+
+      await publicClient.waitForTransactionReceipt({
+        hash,
       });
 
-    setStatus(
-      "Transaction submitted. Waiting for confirmation..."
-    );
+      await refetchAuthorization();
+      await refetchBalance();
 
-    await publicClient.waitForTransactionReceipt({
-      hash,
-    });
-
-    await refetchAuthorization();
-    await refetchBalance();
-
-    setStatus(
-      "Asset issued successfully ✓"
-    );
+      setStatus(
+        "Asset issued successfully ✓"
+      );
+    } finally {
+      setIsConfirming(false);
+    }
   }
 
   return (
@@ -270,9 +251,7 @@ export function IssueAsset() {
         <input
           value={recipient}
           onChange={(event) => {
-            setRecipient(
-              event.target.value
-            );
+            setRecipient(event.target.value);
             setTarget(undefined);
             setStatus("");
           }}
@@ -284,14 +263,11 @@ export function IssueAsset() {
         <input
           value={amount}
           onChange={(event) =>
-            setAmount(
-              event.target.value
-            )
+            setAmount(event.target.value)
           }
           type="number"
           min="0"
           step="1"
-          placeholder="Amount"
           className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition focus:border-blue-400/50"
         />
 
@@ -300,12 +276,12 @@ export function IssueAsset() {
           disabled={
             !validAddress ||
             !validAmount ||
-            isPending
+            busy
           }
           className="rounded-xl bg-blue-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {isPending
-            ? "Confirming..."
+          {busy
+            ? "Processing..."
             : "Issue TIN"}
         </button>
       </div>
@@ -337,11 +313,8 @@ export function IssueAsset() {
               </p>
 
               <p className="mt-1 text-sm font-semibold">
-                {recipientBalance !==
-                undefined
-                  ? formatEther(
-                      recipientBalance
-                    )
+                {recipientBalance !== undefined
+                  ? formatEther(recipientBalance)
                   : "—"}
               </p>
             </div>
@@ -368,8 +341,7 @@ export function IssueAsset() {
 
       {error && (
         <p className="mt-4 break-words text-sm text-red-300">
-          Transaction failed:{" "}
-          {error.message}
+          Transaction failed: {error.message}
         </p>
       )}
     </section>
