@@ -1,3 +1,5 @@
+import { WalletButton } from "@/components/WalletButton";
+
 import {
   addresses,
   getProtocolSnapshot,
@@ -57,11 +59,14 @@ export default async function Home() {
             </p>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <Status active>Arbitrum Sepolia</Status>
+
             <Status active={protocol.ok}>
               {protocol.ok ? "Protocol Live" : "RPC Unavailable"}
             </Status>
+
+            <WalletButton />
           </div>
         </header>
 
