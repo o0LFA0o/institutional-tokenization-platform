@@ -1,108 +1,113 @@
 # Institutional Tokenization Platform
 
-A modular smart-contract platform for **permissioned digital asset issuance and atomic Delivery-versus-Payment (DvP) settlement** on EVM-compatible networks.
+A permissioned real-world asset infrastructure prototype for **regulated token issuance and atomic Delivery-versus-Payment (DvP) settlement on Arbitrum**.
 
-The project models core infrastructure used in institutional digital-asset systems: participant authorization, permissioned asset ownership, role-controlled issuance, signed settlement instructions, and atomic exchange of tokenized assets against tokenized cash.
+**Live app:** https://institutional-tokenization-platform.vercel.app  
+**Network:** Arbitrum Sepolia (`421614`)  
+**Primary category:** RWA  
+**Secondary category:** DeFi
 
-It is designed as an infrastructure-focused reference implementation rather than a consumer DeFi application.
+> **Verified issuer → permissioned RWA issuance → verified participant → EIP-712 authorization → atomic DvP → on-chain proof.**
+
+![Institutional Tokenization Platform Architecture](docs/architecture.png)
 
 ---
 
-## Overview
+## What It Demonstrates
 
-Traditional financial-market infrastructure separates several responsibilities:
+Institutional digital-asset workflows require more than an ERC-20 transfer. They need participant eligibility, controlled issuance, explicit authorization, deterministic settlement, and verifiable post-trade state.
 
-- participant eligibility and compliance
-- asset issuance and ownership
-- cash movement
-- trade authorization
-- settlement execution
-- administrative and emergency controls
+This project models that workflow as a modular smart-contract system:
 
-This project models those responsibilities as separate smart-contract modules rather than combining them into a single monolithic contract.
+1. A compliance operator authorizes an eligible participant.
+2. An issuer mints a permissioned tokenized asset.
+3. Demo settlement cash is funded for the buyer.
+4. Seller and buyer approve the SettlementEngine for their respective settlement legs.
+5. The seller signs the exact settlement instruction using **EIP-712 typed structured data**.
+6. An authorized settlement operator executes `settle(...)`.
+7. The SettlementEngine transfers the asset and cash legs **atomically**.
+8. The settlement ID is recorded to prevent replay or duplicate execution.
 
-The initial implementation supports a simplified institutional transaction:
+If either leg fails, the entire transaction reverts.
 
-1. A compliance officer authorizes eligible participants.
-2. An issuer creates a permissioned tokenized asset.
-3. A seller signs the exact settlement terms using EIP-712 typed structured data.
-4. An authorized settlement operator submits the signed instruction.
-5. The SettlementEngine verifies the seller's authorization.
-6. The asset and cash legs execute atomically.
-7. If either leg fails, the entire transaction reverts.
+---
 
-The result is a permissioned settlement workflow where **either both sides of the exchange complete or neither does**.
+## Live Hackathon Proof
+
+The production frontend is deployed and connected to contracts on **Arbitrum Sepolia**.
+
+### Successful UI-Driven DvP
+
+**Settlement ID:** `arbitrum-open-house-ui-demo-001`
+
+**Trade**
+- Seller delivered: `100 TIN`
+- Buyer delivered: `1,000 MCASH`
+- Execution: atomic through `SettlementEngine`
+- Seller authorization: EIP-712 typed-data signature
+
+**Verified settlement transaction**
+
+[`0xa521817b833d37587588d0f93438a32b61d5fd6c60ce1e479c739116b4d63926`](https://sepolia.arbiscan.io/tx/0xa521817b833d37587588d0f93438a32b61d5fd6c60ce1e479c739116b4d63926)
+
+### Verified Final State
+
+| State | Result |
+|---|---:|
+| Seller TIN | `100` |
+| Seller MCASH | `2000` |
+| Buyer TIN | `100` |
+| Buyer MCASH | `0` |
+| Seller TIN allowance to SettlementEngine | `0` |
+| Buyer MCASH allowance to SettlementEngine | `0` |
+| Settlement recorded | `true` |
+
+`MCASH` is **testnet demo settlement cash** used to model the cash leg. It is not a production stablecoin or deposit token.
 
 ---
 
 ## Architecture
 
-```text
-                    ┌──────────────────────┐
-                    │   IdentityRegistry   │
-                    │                      │
-                    │ Participant          │
-                    │ authorization state  │
-                    └──────────┬───────────┘
-                               │
-                               │ eligibility
-                               ▼
-┌──────────────────┐    ┌──────────────────┐
-│    AssetToken    │    │ SettlementEngine │
-│                  │    │                  │
-│ Permissioned     │◄───│ Atomic DvP       │
-│ ERC-20 asset     │    │ settlement       │
-│                  │    │                  │
-│ Mint / Burn      │    │ EIP-712          │
-│ Pause            │    │ authorization    │
-└──────────────────┘    └────────┬─────────┘
-                                 │
-                                 │ transferFrom
-                                 ▼
-                        ┌──────────────────┐
-                        │  MockCashToken   │
-                        │                  │
-                        │ Test cash leg    │
-                        └──────────────────┘
-```
+The system separates compliance state, asset ownership, settlement cash, and execution logic into distinct modules.
 
-### IdentityRegistry
+### `IdentityRegistry`
 
 Maintains minimal on-chain participant authorization state.
 
 Responsibilities:
-
 - authorize participants
 - revoke participants
 - expose authorization status to other contracts
 - restrict compliance actions using role-based access control
 - emit authorization and revocation events
 
-Sensitive KYC information is intentionally **not stored on-chain**.
+Sensitive KYC information is intentionally **not stored on-chain**. The registry stores only whether an address is currently authorized.
 
-The registry records only whether an address is currently authorized.
-
----
-
-### AssetToken
+### `AssetToken`
 
 A permissioned ERC-20 representing a tokenized financial asset.
 
 Responsibilities:
-
 - role-controlled issuance
 - issuer-controlled burning
 - transfers between authorized participants
-- transfer restrictions based on IdentityRegistry status
+- transfer restrictions based on `IdentityRegistry`
 - emergency pause/unpause controls
 
-The token delegates participant eligibility decisions to the IdentityRegistry instead of duplicating compliance state.
+The token delegates eligibility decisions to the registry instead of duplicating compliance state.
 
-This keeps identity policy separate from asset ownership logic.
+### `MockCashToken`
 
----
+A development-only ERC-20 used to model the cash leg of settlement.
 
-### SettlementEngine
+It can represent the settlement behavior of instruments such as:
+- tokenized deposits
+- regulated stablecoins
+- wholesale settlement tokens
+
+It is **not** a production stablecoin implementation.
+
+### `SettlementEngine`
 
 Coordinates atomic exchange between a tokenized asset and an ERC-20 cash leg.
 
@@ -120,93 +125,19 @@ struct SettlementInstruction {
 }
 ```
 
-The seller signs the exact instruction using **EIP-712 typed structured data**.
-
-An authorized settlement operator then submits:
+The seller signs the exact instruction using EIP-712. An authorized settlement operator then submits:
 
 ```solidity
 settle(instruction, signature)
 ```
 
-Before settlement, the engine verifies:
-
-- the instruction contains valid non-zero fields
-- the caller holds `SETTLER_ROLE`
-- the EIP-712 signature corresponds to the seller
+Before execution, the engine verifies:
+- required fields are non-zero
+- caller holds `SETTLER_ROLE`
+- the EIP-712 signature resolves to the seller
 - the settlement ID has not already been executed
 
-The engine then performs:
-
-```text
-Asset:
-seller ───────────────► buyer
-
-Cash:
-buyer  ───────────────► seller
-```
-
-Both transfers occur inside the same Ethereum transaction.
-
-If either transfer fails, all state changes are reverted.
-
----
-
-### MockCashToken
-
-A development-only ERC-20 used to represent the cash leg during testing.
-
-It can model the settlement behavior of instruments such as:
-
-- tokenized deposits
-- regulated stablecoins
-- wholesale settlement tokens
-
-It is **not intended to represent a production stablecoin or deposit token implementation**.
-
----
-
-## Signed Settlement Authorization
-
-Settlement instructions use OpenZeppelin's EIP-712 and ECDSA implementations.
-
-The EIP-712 domain binds a signature to:
-
-- the protocol name
-- protocol version
-- chain ID
-- deployed SettlementEngine address
-
-This prevents a valid signature from being interpreted as authorization for an unrelated contract or domain.
-
-Conceptually:
-
-```text
-Settlement Terms
-       │
-       ▼
-Structured EIP-712 Message
-       │
-       ▼
-Domain Binding
-       │
-       ▼
-Seller Signature
-       │
-       ▼
-SettlementEngine
-       │
-       ▼
-Recover Signer
-       │
-       ▼
-recoveredSigner == seller
-```
-
-A valid signature proves that the seller authorized the exact signed settlement instruction.
-
-The current implementation uses **seller-side authorization**. Buyer approval of the cash token authorizes token movement but is not treated as a cryptographic signature over the complete settlement terms.
-
-Bilateral signed settlement authorization is outside the current v0.1 scope.
+It then performs both token transfers inside the same EVM transaction.
 
 ---
 
@@ -216,41 +147,39 @@ The core settlement invariant is:
 
 > **The asset transfer and cash transfer must either both succeed or both fail.**
 
-The SettlementEngine first marks the settlement as executed and then attempts both token transfers.
-
-Because all operations occur within one transaction, any later revert also rolls back the settlement marker and any earlier token movement.
-
-Example:
+Conceptually:
 
 ```text
-1. Settlement begins
-
-2. Asset transfer succeeds
-   Luay ──100 NOTE──► Tarik
-
-3. Cash transfer fails
-   Tarik ──1000 CASH─X─► Luay
-
-4. Transaction reverts
-
-FINAL STATE:
-
-Luay:   100 NOTE
-Tarik:  0 NOTE
-
-Tarik:  1000 CASH
-Luay:   0 CASH
-
-settled[id] = false
+Seller                         Buyer
+  │                              │
+  │────── 100 TIN ──────────────►│
+  │                              │
+  │◄──── 1,000 MCASH ────────────│
+  │                              │
+  └──── same EVM transaction ────┘
 ```
 
-There is no partial settlement state.
+If either transfer fails, the transaction reverts and there is no partial settlement state.
+
+---
+
+## EIP-712 Settlement Authorization
+
+The EIP-712 domain binds the seller's signature to:
+- protocol name
+- protocol version
+- chain ID
+- deployed `SettlementEngine` address
+
+The seller therefore authorizes the **exact settlement instruction**, not a generic token movement.
+
+The current version uses seller-side cryptographic authorization. Buyer approval of the cash token permits transfer of the cash leg but is not treated as a bilateral signature over the full settlement terms.
 
 ---
 
 ## Permission Model
 
-The platform separates operational responsibilities using OpenZeppelin `AccessControl`.
+The platform separates operational responsibilities with OpenZeppelin `AccessControl`.
 
 | Role | Responsibility |
 |---|---|
@@ -260,161 +189,87 @@ The platform separates operational responsibilities using OpenZeppelin `AccessCo
 | `PAUSER_ROLE` | Emergency asset-transfer controls |
 | `SETTLER_ROLE` | Submission of settlement transactions |
 
-This separation models institutional least-privilege principles and avoids giving a single operational actor unnecessary authority.
+This models institutional least-privilege principles and avoids concentrating every operational capability in one actor.
 
 ---
 
 ## Security Properties
 
-The current implementation focuses on several explicit security properties.
+The implementation focuses on explicit security guarantees:
 
-### Permissioned transfers
-
-Asset transfers require eligible participants according to the IdentityRegistry.
-
-Revoked participants cannot voluntarily transfer permissioned assets.
-
-### Signed instructions
-
-Settlement terms are cryptographically bound to the seller using EIP-712.
-
-Changing a signed field changes the digest and invalidates the authorization.
-
-### Replay protection
-
-Every settlement contains a unique `settlementId`.
-
-Successfully executed IDs cannot be settled again.
-
-### Atomicity
-
-The asset and cash legs execute within one transaction.
-
-Failure of either leg reverts the complete settlement.
-
-### Reentrancy protection
-
-Settlement execution uses OpenZeppelin `ReentrancyGuard`.
-
-### Safe token interaction
-
-ERC-20 settlement transfers use OpenZeppelin `SafeERC20`.
-
-### Emergency controls
-
-Permissioned asset movement can be paused by an authorized operator.
-
-### Minimal identity state
-
-Personal KYC information is not stored on-chain.
-
-Only authorization status is maintained.
+- **Permissioned transfers** — asset movement is restricted by participant eligibility.
+- **Signed instructions** — settlement terms are cryptographically bound to the seller with EIP-712.
+- **Replay protection** — each settlement uses a unique `settlementId`.
+- **Atomicity** — asset and cash legs succeed or revert together.
+- **Reentrancy protection** — settlement execution uses OpenZeppelin `ReentrancyGuard`.
+- **Safe ERC-20 interaction** — token transfers use `SafeERC20`.
+- **Emergency controls** — permissioned asset movement can be paused.
+- **Minimal identity state** — no personal KYC records are stored on-chain.
 
 ---
 
-## Example Transaction
+## Arbitrum Sepolia Deployment
 
-Consider a simplified tokenized-note transaction.
+| Contract | Address |
+|---|---|
+| `IdentityRegistry` | [`0x1B6e4b00F58269dFb8a8954B2a1Fd17bfE3593E7`](https://sepolia.arbiscan.io/address/0x1B6e4b00F58269dFb8a8954B2a1Fd17bfE3593E7) |
+| `AssetToken` | [`0x8E27fb322ab06B890657B640B59b7870Db813c59`](https://sepolia.arbiscan.io/address/0x8E27fb322ab06B890657B640B59b7870Db813c59) |
+| `MockCashToken` | [`0xe504Fd4568aDC3AcCd147d0b7848743F85Ae920f`](https://sepolia.arbiscan.io/address/0xe504Fd4568aDC3AcCd147d0b7848743F85Ae920f) |
+| `SettlementEngine` | [`0x435D03aC40aDC9c502d2Bed8B3B3F15862ECA9F6`](https://sepolia.arbiscan.io/address/0x435D03aC40aDC9c502d2Bed8B3B3F15862ECA9F6) |
 
-```text
-Participants
+---
 
-Faris  → Platform administrator
-Wa'el  → Compliance officer
-Luay   → Note issuer / seller
-Tarik  → Investor / buyer
-Settler → Authorized settlement operator
-```
+## Frontend
 
-### 1. Participant authorization
+The production interface exposes the institutional workflow directly:
 
-Wa'el authorizes Luay and Tarik through the IdentityRegistry.
+1. **Compliance** — inspect and authorize participant eligibility
+2. **Issuance** — mint permissioned tokenized assets
+3. **Settlement Preparation** — fund demo cash and approve both settlement legs
+4. **Final Settlement** — sign and execute atomic DvP
+5. **On-Chain Proof** — inspect protocol state and transaction evidence
 
-```text
-IdentityRegistry
+### Frontend Stack
 
-Luay   → AUTHORIZED
-Tarik  → AUTHORIZED
-```
+- Next.js
+- React
+- TypeScript
+- wagmi
+- viem
+- TanStack Query
+- Tailwind CSS
 
-### 2. Asset issuance
+---
 
-Luay issues 100 NOTE.
+## Smart-Contract Stack
 
-```text
-Luay
-└── 100 NOTE
-```
-
-Tarik holds 1,000 units of the mock cash token.
-
-```text
-Tarik
-└── 1,000 CASH
-```
-
-### 3. Settlement authorization
-
-Luay signs:
-
-```text
-Seller:       Luay
-Buyer:        Tarik
-Asset:        NOTE
-Asset amount: 100
-Cash:         CASH
-Cash amount:  1,000
-Settlement:   unique settlement ID
-```
-
-### 4. Settlement
-
-The authorized settlement operator submits the instruction and Luay's signature.
-
-```text
-                 SettlementEngine
-                       │
-              verify EIP-712 signature
-                       │
-                       ▼
-             ┌───────────────────┐
-             │                   │
-             ▼                   ▼
-
-Luay ──100 NOTE──► Tarik
-
-Luay ◄─1000 CASH── Tarik
-```
-
-### 5. Final state
-
-```text
-Luay
-├── 0 NOTE
-└── 1,000 CASH
-
-Tarik
-├── 100 NOTE
-└── 0 CASH
-
-Settlement ID
-└── EXECUTED
-```
+- Solidity `0.8.34`
+- Hardhat `3`
+- TypeScript
+- ethers.js `6`
+- OpenZeppelin Contracts
+- EIP-712
+- ECDSA
+- ERC-20
+- AccessControl
+- SafeERC20
+- ReentrancyGuard
+- Pausable
+- Mocha
+- Chai
 
 ---
 
 ## Testing
 
-The project currently contains **70 passing tests** covering unit and integration behavior.
+The project contains **70 passing tests** covering unit and integration behavior.
 
 ```bash
 npx hardhat test
 ```
 
 Coverage includes:
-
-- identity authorization
-- identity revocation
+- identity authorization and revocation
 - compliance-role enforcement
 - role revocation
 - permissioned minting
@@ -428,8 +283,7 @@ Coverage includes:
 - insufficient asset balances
 - insufficient cash balances
 - missing token approvals
-- revoked buyers
-- revoked sellers
+- revoked buyers and sellers
 - paused assets
 - settlement replay protection
 - transaction rollback behavior
@@ -438,98 +292,30 @@ The integration suite verifies that the contracts behave correctly as a system r
 
 ---
 
-## Technology
+## Run Locally
 
-- Solidity `0.8.34`
-- Hardhat `3`
-- TypeScript
-- ethers.js `6`
-- OpenZeppelin Contracts
-- Mocha
-- Chai
-- EIP-712
-- ECDSA
-- ERC-20
-- AccessControl
-- SafeERC20
-- ReentrancyGuard
-- Pausable
+### Smart Contracts
 
----
-
-## Design Principles
-
-The platform follows several architectural constraints:
-
-**Modular state ownership**
-
-Each contract owns a narrow category of state.
-
-**Minimal dependencies**
-
-Contracts depend only on the interfaces required to perform their responsibilities.
-
-**No duplicated compliance state**
-
-AssetToken queries IdentityRegistry rather than maintaining its own authorization mapping.
-
-**Least privilege**
-
-Administrative, compliance, issuance, emergency, and settlement responsibilities are separated.
-
-**Minimal on-chain identity data**
-
-The protocol does not attempt to place full KYC records on-chain.
-
-**No premature upgradeability**
-
-The initial version is intentionally non-upgradeable to keep trust assumptions and execution paths explicit.
-
-**No unnecessary protocol surface**
-
-The project intentionally avoids unrelated DeFi features such as AMMs, yield farming, governance tokens, lending pools, or retail trading functionality.
-
----
-
-## Current Scope
-
-The current implementation demonstrates the core transaction path:
-
-```text
-Participant Authorization
-          ↓
-Permissioned Asset Issuance
-          ↓
-EIP-712 Settlement Authorization
-          ↓
-Atomic Asset / Cash Settlement
-          ↓
-Replay Protection
+```bash
+npm install
+npx hardhat test
 ```
 
-The project is intended as a focused foundation for exploring institutional digital-asset infrastructure rather than a complete production financial system.
+Run the reproducible local demo:
 
----
+```bash
+npx hardhat run scripts/demo.ts
+```
 
-## Non-Goals
+### Frontend
 
-The current version does not attempt to implement:
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-- complete KYC/AML infrastructure
-- custody infrastructure
-- production stablecoins or deposit tokens
-- privacy-preserving identity
-- cross-chain settlement
-- proxy upgradeability
-- order books or matching engines
-- AMMs
-- lending markets
-- yield farming
-- governance tokens
-- complex corporate actions
-- production key-management infrastructure
-
-These concerns would require additional operational, legal, security, and infrastructure assumptions beyond the scope of this implementation.
+Then open the local Next.js development server shown in the terminal.
 
 ---
 
@@ -547,6 +333,10 @@ contracts/
 └── mocks/
     └── MockCashToken.sol
 
+frontend/
+├── app/
+└── components/
+
 test/
 ├── AssetToken.ts
 ├── IdentityRegistry.ts
@@ -554,64 +344,92 @@ test/
 ├── SettlementEngine.ts
 └── SettlementIntegration.ts
 
+deployments/
+└── arbitrum-sepolia.json
+
 docs/
-└── architecture.md
+└── architecture.png
 ```
 
 ---
 
-## End-to-End Demo
+## Design Principles
 
-The repository includes a reproducible institutional tokenization demo that walks through the full transaction lifecycle:
+**Modular state ownership**  
+Each contract owns a narrow category of state.
 
-1. Deploy the identity registry, tokenized asset, cash token, and settlement engine
-2. Grant the compliance role
-3. Authorize the issuer and investor
-4. Issue tokenized notes to the seller
-5. Fund the investor with cash tokens
-6. Approve the settlement engine to move both assets
-7. Create an EIP-712 settlement instruction
-8. Sign the instruction with the seller's wallet
-9. Execute atomic delivery-versus-payment through an authorized settlement operator
-10. Verify the final balances and settlement state
+**Minimal dependencies**  
+Contracts depend only on the interfaces required to perform their responsibilities.
 
-Run the demo:
+**No duplicated compliance state**  
+`AssetToken` queries `IdentityRegistry` rather than maintaining its own authorization mapping.
 
-```bash
-npx hardhat run scripts/demo.ts
-'''
+**Least privilege**  
+Administrative, compliance, issuance, emergency, and settlement responsibilities are separated.
 
-Example state transition:
+**Minimal on-chain identity data**  
+The protocol does not place full KYC records on-chain.
+
+**No premature upgradeability**  
+The current version is intentionally non-upgradeable so trust assumptions and execution paths remain explicit.
+
+**Focused protocol surface**  
+The project intentionally avoids unrelated DeFi features such as AMMs, yield farming, lending pools, governance tokens, or retail trading functionality.
+
+---
+
+## Current Scope
+
+The hackathon MVP demonstrates:
 
 ```text
-BEFORE SETTLEMENT
-Luay NOTE: 100.0
-Luay CASH: 0.0
-Tarik NOTE: 0.0
-Tarik CASH: 1000.0
-
-AFTER SETTLEMENT
-Luay NOTE: 0.0
-Luay CASH: 1000.0
-Tarik NOTE: 100.0
-Tarik CASH: 0.0
-
-Settlement executed: true
+Participant Authorization
+        ↓
+Permissioned RWA Issuance
+        ↓
+Settlement Preparation
+        ↓
+EIP-712 Seller Authorization
+        ↓
+Atomic Asset / Cash Settlement
+        ↓
+Replay Protection
+        ↓
+On-Chain Proof
 ```
 
-This demonstrates atomic delivery-versus-payment: either both the asset and cash legs complete in the same transaction, or the entire settlement reverts.
+This is a focused reference implementation for institutional digital-asset infrastructure, not a complete production financial system.
 
+---
+
+## Non-Goals
+
+The current version does not attempt to implement:
+- complete KYC/AML infrastructure
+- custody infrastructure
+- production stablecoins or deposit tokens
+- privacy-preserving identity
+- cross-chain settlement
+- proxy upgradeability
+- order books or matching engines
+- AMMs
+- lending markets
+- yield farming
+- governance tokens
+- complex corporate actions
+- production key-management infrastructure
+
+Those concerns require additional operational, legal, security, and infrastructure assumptions beyond the scope of this MVP.
 
 ---
 
 ## Status
 
-Current development milestone:
-
-**Permissioned asset issuance + signed atomic DvP settlement**
+**Hackathon milestone: permissioned RWA issuance + interactive signed atomic DvP settlement on Arbitrum Sepolia**
 
 - IdentityRegistry implemented
 - Permissioned AssetToken implemented
+- Mock settlement cash implemented
 - Role-based controls implemented
 - Emergency pause controls implemented
 - SettlementEngine implemented
@@ -620,6 +438,7 @@ Current development milestone:
 - EIP-712 seller authorization implemented
 - Settlement replay protection implemented
 - Atomic DvP integration tests implemented
+- Interactive frontend workflow implemented
+- Arbitrum Sepolia deployment live
+- UI-driven settlement successfully executed on-chain
 - 70 tests passing
-
-Further development will remain focused on institutional digital-asset infrastructure and explicit security properties rather than expanding into unrelated Web3 functionality.
