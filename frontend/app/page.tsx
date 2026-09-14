@@ -1,5 +1,6 @@
 import { WalletButton } from "@/components/WalletButton";
 import { WalletAccessPanel } from "@/components/WalletAccessPanel";
+import { AuthorizeParticipant } from "@/components/AuthorizeParticipant";
 
 import {
   addresses,
@@ -44,7 +45,6 @@ export default async function Home() {
   return (
     <main className="min-h-screen bg-[#080b10] text-white">
       <div className="mx-auto max-w-7xl px-6 py-10 lg:px-10">
-        <WalletAccessPanel />
         <header className="flex flex-col gap-6 border-b border-white/10 pb-8 md:flex-row md:items-center md:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-blue-400">
@@ -73,6 +73,8 @@ export default async function Home() {
         </header>
 
         <WalletAccessPanel />
+
+        <AuthorizeParticipant />
 
         <section className="mt-10 grid gap-6 lg:grid-cols-[1.3fr_.7fr]">
           <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8">
